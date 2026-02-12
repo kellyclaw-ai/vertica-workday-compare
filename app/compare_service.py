@@ -43,6 +43,12 @@ def _sheet_name(name: str) -> str:
     return safe[:31] if len(safe) > 31 else safe
 
 
+def _safe_table_label(table_name: str) -> str:
+    # keep only table part (after schema), remove periods/slashes/backslashes
+    base = table_name.split(".")[-1]
+    return base.replace("/", "_").replace("\\", "_").replace(".", "_")
+
+
 def _write_table(ws, rows: list[dict[str, Any]], headers: list[str] | None = None):
     if headers is None:
         headers = list(rows[0].keys()) if rows else []
@@ -150,28 +156,29 @@ def compare_tables(
     # Output workbook
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = out_dir / f"compare_{left_table.replace('.', '_')}__{right_table.replace('.', '_')}__{ts}.xlsx"
+    ts = datetime.now().strftime("%H%M")
+    right_label = _safe_table_label(right_table)
+    out_path = out_dir / f"compare_{right_label}_{ts}.xlsx"
 
     wb = Workbook()
     ws_left_only = wb.active
-    ws_left_only.title = "only in left"
+    ws_left_only.title = _sheet_name("only in left")
     _write_table(ws_left_only, only_left_rows, headers=left_select_fields)
 
-    ws_right_only = wb.create_sheet("only in right")
+    ws_right_only = wb.create_sheet(_sheet_name("only in right"))
     _write_table(ws_right_only, only_right_rows, headers=right_select_fields)
 
-    ws_diffs = wb.create_sheet("field differences")
+    ws_diffs = wb.create_sheet(_sheet_name("field differences"))
     diff_headers = left_key_fields + ["field_name", "left_value", "right_value"]
     _write_table(ws_diffs, field_differences_rows, headers=diff_headers)
 
-    ws_summary = wb.create_sheet("field difference summary")
+    ws_summary = wb.create_sheet(_sheet_name("field difference summary"))
     _write_table(ws_summary, summary_rows, headers=["left_field", "right_field", "difference_count"])
 
-    ws_left_fields = wb.create_sheet("left only fields")
+    ws_left_fields = wb.create_sheet(_sheet_name("left only fields"))
     _write_table(ws_left_fields, [{"left_field": f} for f in left_only_fields], headers=["left_field"])
 
-    ws_right_fields = wb.create_sheet("right only fields")
+    ws_right_fields = wb.create_sheet(_sheet_name("right only fields"))
     _write_table(ws_right_fields, [{"right_field": f} for f in right_only_fields], headers=["right_field"])
 
     ws_left_table = wb.create_sheet(_sheet_name(f"left_{left_table}"))

@@ -10,7 +10,11 @@
     .col { flex: 1 1 420px; min-width: 360px; }
     .frame { border:1px solid #ddd; padding:12px; margin:10px 0; border-radius:8px; }
     .small { font-size: 12px; color:#444; }
-    table { border-collapse: collapse; width: 100%; margin: 8px 0 12px 0; }
+    table { border-collapse: collapse; width: max-content; min-width: 100%; margin: 8px 0 12px 0; }
+     th, td { border:1px solid #ddd; padding:6px; text-align:left; vertical-align: top; }
+     th { background:#f6f6f6; }
+     code { white-space: pre-wrap; }
++    .table-scroll { overflow: auto; max-height: 420px; border:1px solid #eee; }
     th, td { border:1px solid #ddd; padding:6px; text-align:left; vertical-align: top; }
     th { background:#f6f6f6; }
     code { white-space: pre-wrap; }
@@ -150,11 +154,12 @@
     {% for f in trace_frames %}
       <div class="frame">
         <h3>{{ f.left_table }} ↔ {{ f.right_table }}</h3>
-        <div class="row">
-          <div class="col">
-            <h4>LEFT: {{ f.left.table }}</h4>
-            <div>SQL: <code>{{ f.left.sql }}</code></div>
-            <div>Seconds: {{ f.left.seconds }}</div>
+
+        <div class="frame">
+          <h4>LEFT: {{ f.left.table }}</h4>
+          <div>SQL: <code>{{ f.left.sql }}</code></div>
+          <div>Seconds: {{ f.left.seconds }}</div>
+          <div class="table-scroll">
             <table>
               <thead>
                 <tr>
@@ -172,11 +177,13 @@
               </tbody>
             </table>
           </div>
+        </div>
 
-          <div class="col">
-            <h4>RIGHT: {{ f.right.table }}</h4>
-            <div>SQL: <code>{{ f.right.sql }}</code></div>
-            <div>Seconds: {{ f.right.seconds }}</div>
+        <div class="frame">
+          <h4>RIGHT: {{ f.right.table }}</h4>
+          <div>SQL: <code>{{ f.right.sql }}</code></div>
+          <div>Seconds: {{ f.right.seconds }}</div>
+          <div class="table-scroll">
             <table>
               <thead>
                 <tr>
