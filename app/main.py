@@ -118,7 +118,7 @@ def compare_ui(
     request: Request,
     left_table: str = Form(...),
     right_table: str = Form(...),
-    limit: int = Form(500),
+    employee_id: str = Form(""),
     god_mode: bool = Form(False),
     trim_strings: bool = Form(True),
     nullish_equal: bool = Form(True),
@@ -131,7 +131,7 @@ def compare_ui(
         left_table,
         right_table,
         field_maps,
-        limit,
+        employee_id.strip() or None,
         god_mode,
         trim_strings,
         nullish_equal,
@@ -143,6 +143,7 @@ def compare_ui(
         compare_result={
             "left_table": left_table,
             "right_table": right_table,
+            "employee_id": employee_id,
             "result": result,
             "unmapped_fields": result["unmapped_fields"],
         },
@@ -172,6 +173,12 @@ async def trace_ui(request: Request):
 
         l_fields = selected_left_fields or l_fields_all
         r_fields = selected_right_fields or r_fields_all
+
+        # Prefer source/table column order when building selected field lists
+        left_order = get_table_columns(_conn_left(), tm.left_table)
+        right_order = get_table_columns(_conn_right(), tm.right_table)
+        l_fields = [c for c in left_order if c in set(l_fields)] if left_order else l_fields
+        r_fields = [c for c in right_order if c in set(r_fields)] if right_order else r_fields
 
         left_frame = employee_trace(_conn_left(), tm.left_table, employee_id, l_fields, "employee_id")
         right_frame = employee_trace(_conn_right(), tm.right_table, employee_id, r_fields, "employee_id")

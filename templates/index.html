@@ -11,13 +11,11 @@
     .frame { border:1px solid #ddd; padding:12px; margin:10px 0; border-radius:8px; }
     .small { font-size: 12px; color:#444; }
     table { border-collapse: collapse; width: max-content; min-width: 100%; margin: 8px 0 12px 0; }
-     th, td { border:1px solid #ddd; padding:6px; text-align:left; vertical-align: top; }
-     th { background:#f6f6f6; }
-     code { white-space: pre-wrap; }
-+    .table-scroll { overflow: auto; max-height: 420px; border:1px solid #eee; }
     th, td { border:1px solid #ddd; padding:6px; text-align:left; vertical-align: top; }
     th { background:#f6f6f6; }
     code { white-space: pre-wrap; }
+    .table-scroll { overflow: auto; max-height: 420px; border:1px solid #eee; }
+    .frame-scroll { overflow: auto; max-height: 520px; border:1px solid #eee; padding:8px; }
   </style>
 </head>
 <body>
@@ -45,8 +43,8 @@
 
       <div class="row">
         <div class="col">
-          <label>Limit</label><br/>
-          <input name="limit" type="number" value="500" />
+          <label>employee_id (optional filter)</label><br/>
+          <input name="employee_id" value="{{ compare_result.employee_id if compare_result else '' }}" />
         </div>
         <div class="col">
           <label><input type="checkbox" name="trim_strings" checked /> Trim strings</label><br/>
@@ -155,7 +153,7 @@
       <div class="frame">
         <h3>{{ f.left_table }} ↔ {{ f.right_table }}</h3>
 
-        <div class="frame">
+        <div class="frame frame-scroll">
           <h4>LEFT: {{ f.left.table }}</h4>
           <div>SQL: <code>{{ f.left.sql }}</code></div>
           <div>Seconds: {{ f.left.seconds }}</div>
@@ -179,7 +177,7 @@
           </div>
         </div>
 
-        <div class="frame">
+        <div class="frame frame-scroll">
           <h4>RIGHT: {{ f.right.table }}</h4>
           <div>SQL: <code>{{ f.right.sql }}</code></div>
           <div>Seconds: {{ f.right.seconds }}</div>

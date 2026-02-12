@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,9 +11,53 @@ from app.mapping_store import field_map_for_table, key_map_for_table
 from app.models import FieldMap
 
 
-def _normalize(v: Any, *, trim_strings: bool = True, nullish_equal: bool = True, number_precision: int = 6):
+def _looks_datetime_field(field_name: str) -> bool:
+    n = field_name.lower()
+    tokens = ("date", "time", "timestamp", "datetime", "_dt", "_dttm")
+    return any(t in n for t in tokens)
+
+
+def _normalize_datetime_value(v: Any):
     if v is None:
         return None
+    if isinstance(v, datetime):
+        return v.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(v, date):
+        return datetime(v.year, v.month, v.day, 0, 0, 0).strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return None
+        # try common datetime/date layouts
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d",
+            "%m/%d/%Y %H:%M:%S",
+            "%m/%d/%Y %H:%M",
+            "%m/%d/%Y",
+        ):
+            try:
+                dt = datetime.strptime(s, fmt)
+                if fmt in ("%Y-%m-%d", "%m/%d/%Y"):
+                    dt = datetime(dt.year, dt.month, dt.day, 0, 0, 0)
+                return dt.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+        # ISO fallbacks
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return s
+    return v
+
+
+def _normalize(v: Any, *, field_name: str | None = None, trim_strings: bool = True, nullish_equal: bool = True, number_precision: int = 6):
+    if v is None:
+        return None
+    if field_name and _looks_datetime_field(field_name):
+        return _normalize_datetime_value(v)
     if isinstance(v, str):
         vv = v.strip() if trim_strings else v
         if nullish_equal and vv == "":
@@ -63,7 +107,7 @@ def compare_tables(
     left_table: str,
     right_table: str,
     all_field_maps: list[FieldMap],
-    limit: int = 500,
+    employee_id: str | None = None,
     god_mode: bool = False,
     trim_strings: bool = True,
     nullish_equal: bool = True,
@@ -99,20 +143,32 @@ def compare_tables(
     left_select_fields = _unique_keep_order(left_key_fields + left_compare_fields)
     right_select_fields = _unique_keep_order(right_key_fields + right_compare_fields)
 
-    left_sql = f"SELECT {', '.join(left_select_fields)} FROM {left_table} LIMIT {int(limit)}"
-    right_sql = f"SELECT {', '.join(right_select_fields)} FROM {right_table} LIMIT {int(limit)}"
+    left_sql = f"SELECT {', '.join(left_select_fields)} FROM {left_table}"
+    right_sql = f"SELECT {', '.join(right_select_fields)} FROM {right_table}"
 
-    l_cols, l_rows, l_sec = run_query(left_conn, left_sql)
-    r_cols, r_rows, r_sec = run_query(right_conn, right_sql)
+    left_params: tuple | None = None
+    right_params: tuple | None = None
+
+    if employee_id:
+        lk_emp = next((k for k in left_key_fields if k.lower() == "employee_id"), None)
+        rk_emp = next((k for k in right_key_fields if k.lower() == "employee_id"), None)
+        if lk_emp and rk_emp:
+            left_sql += f" WHERE {lk_emp} = %s"
+            right_sql += f" WHERE {rk_emp} = %s"
+            left_params = (employee_id,)
+            right_params = (employee_id,)
+
+    l_cols, l_rows, l_sec = run_query(left_conn, left_sql, left_params)
+    r_cols, r_rows, r_sec = run_query(right_conn, right_sql, right_params)
 
     left_data = _rows_to_dicts(l_cols, l_rows)
     right_data = _rows_to_dicts(r_cols, r_rows)
 
     def lkey(row: dict[str, Any]):
-        return tuple(_normalize(row.get(k), trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in left_key_fields)
+        return tuple(_normalize(row.get(k), field_name=k, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in left_key_fields)
 
     def rkey(row: dict[str, Any]):
-        return tuple(_normalize(row.get(k), trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in right_key_fields)
+        return tuple(_normalize(row.get(k), field_name=k, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in right_key_fields)
 
     left_ix = {lkey(row): row for row in left_data}
     right_ix = {rkey(row): row for row in right_data}
@@ -123,6 +179,17 @@ def compare_tables(
     only_left_rows = [left_ix[k] for k in sorted(left_keys - right_keys)]
     only_right_rows = [right_ix[k] for k in sorted(right_keys - left_keys)]
 
+    def _norm_row(row: dict[str, Any], fields: list[str]) -> dict[str, Any]:
+        return {
+            f: _normalize(row.get(f), field_name=f, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+            for f in fields
+        }
+
+    only_left_rows_norm = [_norm_row(r, left_select_fields) for r in only_left_rows]
+    only_right_rows_norm = [_norm_row(r, right_select_fields) for r in only_right_rows]
+    left_data_norm = [_norm_row(r, left_select_fields) for r in left_data]
+    right_data_norm = [_norm_row(r, right_select_fields) for r in right_data]
+
     field_differences_rows: list[dict[str, Any]] = []
     summary_counts: dict[tuple[str, str], int] = {}
 
@@ -130,19 +197,19 @@ def compare_tables(
         lrow = left_ix[k]
         rrow = right_ix[k]
 
-        key_payload = {lf: lrow.get(lf) for lf in left_key_fields}
+        key_payload = {lf: _normalize(lrow.get(lf), field_name=lf, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for lf in left_key_fields}
 
         for fm in compare_maps:
             lv_raw = lrow.get(fm.left_field)
             rv_raw = rrow.get(fm.right_field)
-            lv = _normalize(lv_raw, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
-            rv = _normalize(rv_raw, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+            lv = _normalize(lv_raw, field_name=fm.left_field, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+            rv = _normalize(rv_raw, field_name=fm.right_field, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
             if lv != rv:
                 out = {
                     **key_payload,
                     "field_name": f"{fm.left_field} -> {fm.right_field}",
-                    "left_value": lv_raw,
-                    "right_value": rv_raw,
+                    "left_value": lv,
+                    "right_value": rv,
                 }
                 field_differences_rows.append(out)
                 key = (fm.left_field, fm.right_field)
@@ -163,10 +230,10 @@ def compare_tables(
     wb = Workbook()
     ws_left_only = wb.active
     ws_left_only.title = _sheet_name("only in left")
-    _write_table(ws_left_only, only_left_rows, headers=left_select_fields)
+    _write_table(ws_left_only, only_left_rows_norm, headers=left_select_fields)
 
     ws_right_only = wb.create_sheet(_sheet_name("only in right"))
-    _write_table(ws_right_only, only_right_rows, headers=right_select_fields)
+    _write_table(ws_right_only, only_right_rows_norm, headers=right_select_fields)
 
     ws_diffs = wb.create_sheet(_sheet_name("field differences"))
     diff_headers = left_key_fields + ["field_name", "left_value", "right_value"]
@@ -182,10 +249,10 @@ def compare_tables(
     _write_table(ws_right_fields, [{"right_field": f} for f in right_only_fields], headers=["right_field"])
 
     ws_left_table = wb.create_sheet(_sheet_name(f"left_{left_table}"))
-    _write_table(ws_left_table, left_data, headers=left_select_fields)
+    _write_table(ws_left_table, left_data_norm, headers=left_select_fields)
 
     ws_right_table = wb.create_sheet(_sheet_name(f"right_{right_table}"))
-    _write_table(ws_right_table, right_data, headers=right_select_fields)
+    _write_table(ws_right_table, right_data_norm, headers=right_select_fields)
 
     wb.save(out_path)
 
