@@ -7,6 +7,7 @@ class VerticaConn(BaseModel):
     user: str
     password: str
     database: str
+    ssl: bool = True
 
 
 class Settings(BaseModel):
