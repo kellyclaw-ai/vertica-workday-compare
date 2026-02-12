@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from openpyxl import Workbook
+from openpyxl.styles import PatternFill
 
 from app.db import get_table_columns, run_query
 from app.mapping_store import field_map_for_table, key_map_for_table
@@ -259,30 +260,38 @@ def compare_tables(
         for (lf, rf), cnt in sorted(summary_counts.items(), key=lambda x: (-x[1], x[0][0], x[0][1]))
     ]
 
-    # Combined dataset tab using left-side naming convention
-    right_to_left = {f.right_field: f.left_field for f in pair_field_maps}
+    # Combined dataset tab with side-by-side left/right values and mismatch identifier
+    compare_pairs = [(f.left_field, f.right_field) for f in compare_maps]
 
-    def _right_row_to_left_names(row: dict[str, Any]) -> dict[str, Any]:
-        out = {lf: None for lf in left_select_fields}
-        for rf, v in row.items():
-            lf = right_to_left.get(rf)
-            if lf in out:
-                out[lf] = _normalize(v, field_name=lf, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+    def _combined_row(origin: str, key_tuple: tuple[Any, ...], lrow: dict[str, Any] | None, rrow: dict[str, Any] | None) -> dict[str, Any]:
+        out: dict[str, Any] = {"row_origin": origin, "mismatch_fields": ""}
+
+        # Key columns (left naming convention)
+        for i, lk in enumerate(left_key_fields):
+            out[lk] = key_tuple[i] if i < len(key_tuple) else None
+
+        mismatches: list[str] = []
+        for lf, rf in compare_pairs:
+            lv = _normalize((lrow or {}).get(lf), field_name=lf, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+            rv = _normalize((rrow or {}).get(rf), field_name=rf, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+            out[f"left_{lf}"] = lv
+            out[f"right_{lf}"] = rv
+            if origin == "both" and lv != rv:
+                mismatches.append(lf)
+
+        out["mismatch_fields"] = ", ".join(mismatches)
         return out
 
     combined_rows = []
-    for r in only_left_rows_norm:
-        combined_rows.append({"row_origin": "left_only", **r})
-    for r in only_right_rows_norm:
-        combined_rows.append({"row_origin": "right_only", **_right_row_to_left_names(r)})
-    for r in both_rows_left_norm:
-        combined_rows.append({"row_origin": "both", **r})
+    for k in sorted(left_keys - right_keys):
+        combined_rows.append(_combined_row("left_only", k, left_ix[k], None))
+    for k in sorted(right_keys - left_keys):
+        combined_rows.append(_combined_row("right_only", k, None, right_ix[k]))
+    for k in sorted(left_keys & right_keys):
+        combined_rows.append(_combined_row("both", k, left_ix[k], right_ix[k]))
 
-    # sort combined by PKs using left naming
-    combined_rows = sorted(
-        combined_rows,
-        key=lambda r: tuple(str(r.get(k, "")) for k in left_key_fields),
-    )
+    # sort combined by PKs (already normalized in tuple key)
+    combined_rows = sorted(combined_rows, key=lambda r: tuple(str(r.get(k, "")) for k in left_key_fields))
 
     # Output workbook
     out_dir = Path(output_dir)
@@ -307,7 +316,28 @@ def compare_tables(
     _write_table(ws_right_fields, [{"right_field": f} for f in right_only_fields], headers=["right_field"])
 
     ws_combined = wb.create_sheet(_sheet_name("combined dataset"))
-    _write_table(ws_combined, combined_rows, headers=["row_origin"] + left_select_fields)
+    combined_headers = ["row_origin", "mismatch_fields"] + left_key_fields
+    for lf, _ in compare_pairs:
+        combined_headers.append(f"left_{lf}")
+        combined_headers.append(f"right_{lf}")
+    _write_table(ws_combined, combined_rows, headers=combined_headers)
+
+    # Highlight mismatched left/right cells for rows present on both sides
+    mismatch_fill = PatternFill(start_color="FFF3B0", end_color="FFF3B0", fill_type="solid")
+    header_idx = {h: i + 1 for i, h in enumerate(combined_headers)}
+    for row_idx in range(2, ws_combined.max_row + 1):
+        if ws_combined.cell(row=row_idx, column=header_idx["row_origin"]).value != "both":
+            continue
+        for lf, _ in compare_pairs:
+            lc = header_idx.get(f"left_{lf}")
+            rc = header_idx.get(f"right_{lf}")
+            if not lc or not rc:
+                continue
+            lv = ws_combined.cell(row=row_idx, column=lc).value
+            rv = ws_combined.cell(row=row_idx, column=rc).value
+            if lv != rv:
+                ws_combined.cell(row=row_idx, column=lc).fill = mismatch_fill
+                ws_combined.cell(row=row_idx, column=rc).fill = mismatch_fill
 
     ws_meta = wb.create_sheet(_sheet_name("table names"))
     _write_table(
