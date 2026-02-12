@@ -177,10 +177,11 @@ def compare_tables(
     elif sample_employee_ids and lk_emp and rk_emp:
         sample_n = max(1, int(sample_size))
         sample_sql = (
+            f"SELECT {_quote_ident(lk_emp)} FROM ("
             f"SELECT DISTINCT {_quote_ident(lk_emp)} "
             f"FROM {_quote_table(left_table)} "
-            f"WHERE {_quote_ident(lk_emp)} IS NOT NULL "
-            f"ORDER BY RANDOM() LIMIT {sample_n}"
+            f"WHERE {_quote_ident(lk_emp)} IS NOT NULL"
+            f") s ORDER BY RANDOM() LIMIT {sample_n}"
         )
         s_cols, s_rows, _ = run_query(left_conn, sample_sql)
         sampled_ids = [r[s_cols.index(lk_emp)] for r in s_rows] if s_rows else []
