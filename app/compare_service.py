@@ -217,6 +217,7 @@ def compare_tables(
 
     only_left_rows = [left_ix[k] for k in sorted(left_keys - right_keys)]
     only_right_rows = [right_ix[k] for k in sorted(right_keys - left_keys)]
+    both_rows_left = [left_ix[k] for k in sorted(left_keys & right_keys)]
 
     def _norm_row(row: dict[str, Any], fields: list[str]) -> dict[str, Any]:
         return {
@@ -226,8 +227,7 @@ def compare_tables(
 
     only_left_rows_norm = [_norm_row(r, left_select_fields) for r in only_left_rows]
     only_right_rows_norm = [_norm_row(r, right_select_fields) for r in only_right_rows]
-    left_data_norm = [_norm_row(r, left_select_fields) for r in left_data]
-    right_data_norm = [_norm_row(r, right_select_fields) for r in right_data]
+    both_rows_left_norm = [_norm_row(r, left_select_fields) for r in both_rows_left]
 
     field_differences_rows: list[dict[str, Any]] = []
     summary_counts: dict[tuple[str, str], int] = {}
@@ -259,6 +259,31 @@ def compare_tables(
         for (lf, rf), cnt in sorted(summary_counts.items(), key=lambda x: (-x[1], x[0][0], x[0][1]))
     ]
 
+    # Combined dataset tab using left-side naming convention
+    right_to_left = {f.right_field: f.left_field for f in pair_field_maps}
+
+    def _right_row_to_left_names(row: dict[str, Any]) -> dict[str, Any]:
+        out = {lf: None for lf in left_select_fields}
+        for rf, v in row.items():
+            lf = right_to_left.get(rf)
+            if lf in out:
+                out[lf] = _normalize(v, field_name=lf, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+        return out
+
+    combined_rows = []
+    for r in only_left_rows_norm:
+        combined_rows.append({"row_origin": "left_only", **r})
+    for r in only_right_rows_norm:
+        combined_rows.append({"row_origin": "right_only", **_right_row_to_left_names(r)})
+    for r in both_rows_left_norm:
+        combined_rows.append({"row_origin": "both", **r})
+
+    # sort combined by PKs using left naming
+    combined_rows = sorted(
+        combined_rows,
+        key=lambda r: tuple(str(r.get(k, "")) for k in left_key_fields),
+    )
+
     # Output workbook
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -267,14 +292,8 @@ def compare_tables(
     out_path = out_dir / f"compare_{right_label}_{ts}.xlsx"
 
     wb = Workbook()
-    ws_left_only = wb.active
-    ws_left_only.title = _sheet_name("only in left")
-    _write_table(ws_left_only, only_left_rows_norm, headers=left_select_fields)
-
-    ws_right_only = wb.create_sheet(_sheet_name("only in right"))
-    _write_table(ws_right_only, only_right_rows_norm, headers=right_select_fields)
-
-    ws_diffs = wb.create_sheet(_sheet_name("field differences"))
+    ws_diffs = wb.active
+    ws_diffs.title = _sheet_name("field differences")
     diff_headers = left_key_fields + ["field_name", "left_value", "right_value"]
     _write_table(ws_diffs, field_differences_rows, headers=diff_headers)
 
@@ -287,11 +306,18 @@ def compare_tables(
     ws_right_fields = wb.create_sheet(_sheet_name("right only fields"))
     _write_table(ws_right_fields, [{"right_field": f} for f in right_only_fields], headers=["right_field"])
 
-    ws_left_table = wb.create_sheet(_sheet_name(f"left_{left_table}"))
-    _write_table(ws_left_table, left_data_norm, headers=left_select_fields)
+    ws_combined = wb.create_sheet(_sheet_name("combined dataset"))
+    _write_table(ws_combined, combined_rows, headers=["row_origin"] + left_select_fields)
 
-    ws_right_table = wb.create_sheet(_sheet_name(f"right_{right_table}"))
-    _write_table(ws_right_table, right_data_norm, headers=right_select_fields)
+    ws_meta = wb.create_sheet(_sheet_name("table names"))
+    _write_table(
+        ws_meta,
+        [
+            {"side": "left", "table_name": left_table},
+            {"side": "right", "table_name": right_table},
+        ],
+        headers=["side", "table_name"],
+    )
 
     wb.save(out_path)
 
