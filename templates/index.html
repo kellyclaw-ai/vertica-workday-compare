@@ -5,183 +5,198 @@
   <title>Vertica Workday Compare</title>
   <style>
     body { font-family: sans-serif; margin: 20px; }
-    .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .box { border:1px solid #ccc; padding:12px; border-radius:8px; }
-    .frame { border:1px solid #ddd; padding:10px; margin:8px 0; }
-    pre { white-space: pre-wrap; max-height: 250px; overflow:auto; }
+    .tile { border:1px solid #ccc; padding:14px; border-radius:10px; margin-bottom: 16px; }
+    .row { display:flex; gap: 16px; flex-wrap: wrap; }
+    .col { flex: 1 1 420px; min-width: 360px; }
+    .frame { border:1px solid #ddd; padding:12px; margin:10px 0; border-radius:8px; }
     .small { font-size: 12px; color:#444; }
+    table { border-collapse: collapse; width: 100%; margin: 8px 0 12px 0; }
+    th, td { border:1px solid #ddd; padding:6px; text-align:left; vertical-align: top; }
+    th { background:#f6f6f6; }
+    code { white-space: pre-wrap; }
   </style>
 </head>
 <body>
   <h1>Vertica Workday Compare (localhost)</h1>
 
-  <div class="box" style="margin-bottom:16px;">
-    <h2>Saved jobs</h2>
-    <ul>
-      {% for j in jobs %}
-        <li>
-          <strong>#{{ j.id }}</strong> [{{ j.job_type }}] {{ j.name }}
-          <form method="post" action="/jobs/{{ j.id }}/run" style="display:inline;">
-            <button type="submit">Run metadata replay</button>
-          </form>
-        </li>
-      {% else %}
-        <li>No jobs yet.</li>
-      {% endfor %}
-    </ul>
+  <div class="tile">
+    <h2>1) Table comparison</h2>
+    <p class="small">Comparison writes output workbook automatically to <code>output/</code>.</p>
+
+    <form method="post" action="/compare">
+      <div class="row">
+        <div class="col">
+          <label>Left table</label><br/>
+          <select name="left_table" id="cmp_left">
+            {% for tm in table_maps %}<option value="{{ tm.left_table }}">{{ tm.left_table }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col">
+          <label>Right table</label><br/>
+          <select name="right_table" id="cmp_right">
+            {% for tm in table_maps %}<option value="{{ tm.right_table }}">{{ tm.right_table }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col">
+          <label>Limit</label><br/>
+          <input name="limit" type="number" value="500" />
+        </div>
+        <div class="col">
+          <label><input type="checkbox" name="trim_strings" checked /> Trim strings</label><br/>
+          <label><input type="checkbox" name="nullish_equal" checked /> Treat empty string as null</label><br/>
+          <label>Number precision</label>
+          <input name="number_precision" type="number" value="6" />
+          <label><input type="checkbox" name="god_mode" {% if god_mode_default %}checked{% endif %}/> God mode</label>
+        </div>
+      </div>
+
+      <button type="submit">Run comparison (output to Excel)</button>
+    </form>
+
+    <form method="get" action="/introspect" style="margin-top:10px;">
+      <input type="hidden" name="left_table" id="i_left" />
+      <input type="hidden" name="right_table" id="i_right" />
+      <button type="submit" onclick="document.getElementById('i_left').value=document.getElementById('cmp_left').value;document.getElementById('i_right').value=document.getElementById('cmp_right').value;">Schema introspect + unmapped field report (JSON)</button>
+    </form>
+
+    {% if compare_result %}
+      <h3>Compare: {{ compare_result.left_table }} vs {{ compare_result.right_table }}</h3>
+      <p><strong>Workbook written:</strong> <code>{{ compare_result.result.output_file }}</code></p>
+      <p>
+        only in left: <strong>{{ compare_result.result.counts.only_in_left }}</strong> |
+        only in right: <strong>{{ compare_result.result.counts.only_in_right }}</strong> |
+        field differences: <strong>{{ compare_result.result.counts.field_differences }}</strong>
+      </p>
+
+      <h4>Unmapped fields (present in schema but not in field_map)</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>Left table: not in field_map</th>
+            <th>Right table: not in field_map</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set left_unmapped = compare_result.unmapped_fields.left_only_not_in_field_map %}
+          {% set right_unmapped = compare_result.unmapped_fields.right_only_not_in_field_map %}
+          {% set max_rows = [left_unmapped|length, right_unmapped|length]|max %}
+          {% if max_rows == 0 %}
+            <tr><td colspan="2"><em>No unmapped fields found for this table pair.</em></td></tr>
+          {% else %}
+            {% for i in range(max_rows) %}
+              <tr>
+                <td>{{ left_unmapped[i] if i < (left_unmapped|length) else "" }}</td>
+                <td>{{ right_unmapped[i] if i < (right_unmapped|length) else "" }}</td>
+              </tr>
+            {% endfor %}
+          {% endif %}
+        </tbody>
+      </table>
+    {% endif %}
   </div>
 
-  <div class="grid">
-    <div class="box">
-      <h2>1) Table comparison</h2>
-      <form method="post" action="/compare">
-        <label>Left table</label>
-        <select name="left_table" id="cmp_left">
-          {% for tm in table_maps %}<option value="{{ tm.left_table }}">{{ tm.left_table }}</option>{% endfor %}
-        </select>
-        <label>Right table</label>
-        <select name="right_table" id="cmp_right">
-          {% for tm in table_maps %}<option value="{{ tm.right_table }}">{{ tm.right_table }}</option>{% endfor %}
-        </select>
-        <label>Limit</label><input name="limit" type="number" value="500" />
-        <div class="small">Stronger diff options:</div>
-        <label><input type="checkbox" name="trim_strings" checked /> Trim strings</label>
-        <label><input type="checkbox" name="nullish_equal" checked /> Treat empty string as null</label>
-        <label>Number precision</label><input name="number_precision" type="number" value="6" />
-        <label><input type="checkbox" name="god_mode" {% if god_mode_default %}checked{% endif %}/> God mode</label>
-        <button type="submit">Compare</button>
-      </form>
+  <div class="tile">
+    <h2>2) Employee trace explorer</h2>
+    <form method="post" action="/trace">
+      <div class="row">
+        <div class="col">
+          <label>employee_id</label><br/>
+          <input name="employee_id" value="{{ employee_id }}" />
+        </div>
+        <div class="col">
+          <label><input type="checkbox" name="god_mode" {% if god_mode_default %}checked{% endif %}/> God mode</label>
+        </div>
+      </div>
 
-      <form method="get" action="/introspect" style="margin-top:8px;">
-        <input type="hidden" name="left_table" id="i_left" />
-        <input type="hidden" name="right_table" id="i_right" />
-        <button type="submit" onclick="document.getElementById('i_left').value=document.getElementById('cmp_left').value;document.getElementById('i_right').value=document.getElementById('cmp_right').value;">Schema introspect + unmapped field report + mapping suggestions (JSON)</button>
-      </form>
+      <h3>Tables + field pickers</h3>
+      {% for tm in table_maps %}
+        <div class="frame">
+          <label>
+            <input type="checkbox" name="left_table" value="{{ tm.left_table }}" />
+            {{ tm.left_table }} ↔ {{ tm.right_table }}
+          </label>
 
-      <form method="post" action="/compare/export" style="margin-top:8px;">
-        <label>Export left table</label>
-        <select name="left_table">{% for tm in table_maps %}<option value="{{ tm.left_table }}">{{ tm.left_table }}</option>{% endfor %}</select>
-        <label>Export right table</label>
-        <select name="right_table">{% for tm in table_maps %}<option value="{{ tm.right_table }}">{{ tm.right_table }}</option>{% endfor %}</select>
-        <input name="limit" type="number" value="500" />
-        <select name="fmt"><option value="xlsx">xlsx</option><option value="csv">csv</option></select>
-        <button type="submit">Export diff</button>
-      </form>
-
-      <form method="post" action="/jobs/save" style="margin-top:8px;">
-        <input type="hidden" name="job_type" value="compare" />
-        <input name="name" placeholder="save compare job name" />
-        <select name="left_table">{% for tm in table_maps %}<option value="{{ tm.left_table }}">{{ tm.left_table }}</option>{% endfor %}</select>
-        <select name="right_table">{% for tm in table_maps %}<option value="{{ tm.right_table }}">{{ tm.right_table }}</option>{% endfor %}</select>
-        <input name="limit" type="number" value="500" />
-        <button type="submit">Save compare job</button>
-      </form>
-
-      {% if compare_result %}
-        <h3>Compare: {{ compare_result.left_table }} vs {{ compare_result.right_table }}</h3>
-
-        <h4>Unmapped fields (present in schema but not in field_map)</h4>
-        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse; width: 100%; margin-bottom: 12px;">
-          <thead>
-            <tr>
-              <th style="text-align:left;">Left table: not in field_map</th>
-              <th style="text-align:left;">Right table: not in field_map</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% set left_unmapped = compare_result.unmapped_fields.left_only_not_in_field_map %}
-            {% set right_unmapped = compare_result.unmapped_fields.right_only_not_in_field_map %}
-            {% set max_rows = [left_unmapped|length, right_unmapped|length]|max %}
-            {% if max_rows == 0 %}
-              <tr>
-                <td colspan="2"><em>No unmapped fields found for this table pair.</em></td>
-              </tr>
-            {% else %}
-              {% for i in range(max_rows) %}
-                <tr>
-                  <td>{{ left_unmapped[i] if i < (left_unmapped|length) else "" }}</td>
-                  <td>{{ right_unmapped[i] if i < (right_unmapped|length) else "" }}</td>
-                </tr>
-              {% endfor %}
-            {% endif %}
-          </tbody>
-        </table>
-
-        <h4>Left only ({{ compare_result.result.left_only|length }})</h4><pre>{{ compare_result.result.left_only }}</pre>
-        <h4>Right only ({{ compare_result.result.right_only|length }})</h4><pre>{{ compare_result.result.right_only }}</pre>
-        <h4>Mismatched ({{ compare_result.result.mismatched|length }})</h4><pre>{{ compare_result.result.mismatched }}</pre>
-        <h4>Trace</h4><pre>{{ compare_result.result.trace }}</pre>
-      {% endif %}
-    </div>
-
-    <div class="box">
-      <h2>2) Employee trace explorer</h2>
-      <form method="post" action="/trace">
-        <label>employee_id</label>
-        <input name="employee_id" value="{{ employee_id }}" />
-        <label><input type="checkbox" name="god_mode" {% if god_mode_default %}checked{% endif %}/> God mode</label>
-
-        <h3>Tables + field pickers</h3>
-        {% for tm in table_maps %}
-          <div class="frame">
-            <label>
-              <input type="checkbox" name="left_table" value="{{ tm.left_table }}" />
-              {{ tm.left_table }} ↔ {{ tm.right_table }}
-            </label>
-            <div class="grid">
-              <div>
-                <strong>{{ tm.left_table }} fields</strong><br/>
-                <select name="fields_left::{{ tm.left_table }}" multiple size="6">
-                  {% for fm in field_maps %}
-                    {% if fm.left_table == tm.left_table and fm.right_table == tm.right_table %}
-                      <option value="{{ fm.left_field }}">{{ fm.left_field }}</option>
-                    {% endif %}
-                  {% endfor %}
-                </select>
-              </div>
-              <div>
-                <strong>{{ tm.right_table }} fields</strong><br/>
-                <select name="fields_right::{{ tm.right_table }}" multiple size="6">
-                  {% for fm in field_maps %}
-                    {% if fm.left_table == tm.left_table and fm.right_table == tm.right_table %}
-                      <option value="{{ fm.right_field }}">{{ fm.right_field }}</option>
-                    {% endif %}
-                  {% endfor %}
-                </select>
-              </div>
+          <div class="row" style="margin-top:8px;">
+            <div class="col">
+              <strong>{{ tm.left_table }} fields</strong><br/>
+              <select name="fields_left::{{ tm.left_table }}" multiple size="8" style="width:100%;">
+                {% for fm in field_maps %}
+                  {% if fm.left_table == tm.left_table and fm.right_table == tm.right_table %}
+                    <option value="{{ fm.left_field }}">{{ fm.left_field }}</option>
+                  {% endif %}
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col">
+              <strong>{{ tm.right_table }} fields</strong><br/>
+              <select name="fields_right::{{ tm.right_table }}" multiple size="8" style="width:100%;">
+                {% for fm in field_maps %}
+                  {% if fm.left_table == tm.left_table and fm.right_table == tm.right_table %}
+                    <option value="{{ fm.right_field }}">{{ fm.right_field }}</option>
+                  {% endif %}
+                {% endfor %}
+              </select>
             </div>
           </div>
-        {% endfor %}
+        </div>
+      {% endfor %}
 
-        <button type="submit">Trace employee across selected tables</button>
-      </form>
+      <button type="submit">Trace employee across selected tables</button>
+    </form>
 
-      <form method="post" action="/jobs/save" style="margin-top:8px;">
-        <input type="hidden" name="job_type" value="trace" />
-        <input name="name" placeholder="save trace job name" />
-        <button type="submit">Save trace job (metadata)</button>
-      </form>
-
-      {% for f in trace_frames %}
+    {% for f in trace_frames %}
       <div class="frame">
         <h3>{{ f.left_table }} ↔ {{ f.right_table }}</h3>
-        <div class="grid">
-          <div>
+        <div class="row">
+          <div class="col">
             <h4>LEFT: {{ f.left.table }}</h4>
             <div>SQL: <code>{{ f.left.sql }}</code></div>
             <div>Seconds: {{ f.left.seconds }}</div>
-            <pre>{{ f.left.rows }}</pre>
+            <table>
+              <thead>
+                <tr>
+                  {% for c in f.left.columns %}<th>{{ c }}</th>{% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in f.left.rows %}
+                  <tr>
+                    {% for c in f.left.columns %}<td>{{ row[c] }}</td>{% endfor %}
+                  </tr>
+                {% else %}
+                  <tr><td colspan="{{ f.left.columns|length if f.left.columns else 1 }}"><em>No rows</em></td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
           </div>
-          <div>
+
+          <div class="col">
             <h4>RIGHT: {{ f.right.table }}</h4>
             <div>SQL: <code>{{ f.right.sql }}</code></div>
             <div>Seconds: {{ f.right.seconds }}</div>
-            <pre>{{ f.right.rows }}</pre>
+            <table>
+              <thead>
+                <tr>
+                  {% for c in f.right.columns %}<th>{{ c }}</th>{% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in f.right.rows %}
+                  <tr>
+                    {% for c in f.right.columns %}<td>{{ row[c] }}</td>{% endfor %}
+                  </tr>
+                {% else %}
+                  <tr><td colspan="{{ f.right.columns|length if f.right.columns else 1 }}"><em>No rows</em></td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
-      {% endfor %}
-    </div>
+    {% endfor %}
   </div>
 </body>
 </html>

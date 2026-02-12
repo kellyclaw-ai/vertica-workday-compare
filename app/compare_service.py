@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
 from typing import Any
-from app.db import run_query
+
+from openpyxl import Workbook
+
+from app.db import get_table_columns, run_query
 from app.mapping_store import field_map_for_table, key_map_for_table
 from app.models import FieldMap
-
-
-def _rows_to_dicts(cols: list[str], rows: list[tuple]) -> list[dict[str, Any]]:
-    return [dict(zip(cols, r)) for r in rows]
 
 
 def _normalize(v: Any, *, trim_strings: bool = True, nullish_equal: bool = True, number_precision: int = 6):
@@ -23,6 +24,33 @@ def _normalize(v: Any, *, trim_strings: bool = True, nullish_equal: bool = True,
     return v
 
 
+def _rows_to_dicts(cols: list[str], rows: list[tuple]) -> list[dict[str, Any]]:
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def _unique_keep_order(values: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for v in values:
+        if v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out
+
+
+def _sheet_name(name: str) -> str:
+    safe = name.replace("/", "_").replace("\\", "_").replace(".", "_")
+    return safe[:31] if len(safe) > 31 else safe
+
+
+def _write_table(ws, rows: list[dict[str, Any]], headers: list[str] | None = None):
+    if headers is None:
+        headers = list(rows[0].keys()) if rows else []
+    ws.append(headers)
+    for row in rows:
+        ws.append([row.get(h) for h in headers])
+
+
 def compare_tables(
     left_conn: dict,
     right_conn: dict,
@@ -34,19 +62,39 @@ def compare_tables(
     trim_strings: bool = True,
     nullish_equal: bool = True,
     number_precision: int = 6,
+    output_dir: str = "output",
 ) -> dict[str, Any]:
-    fmaps = field_map_for_table(all_field_maps, left_table, right_table)
-    kmaps = key_map_for_table(all_field_maps, left_table, right_table)
-    if not fmaps:
-        raise ValueError("No field mappings for selected table pair")
-    if not kmaps:
+    pair_field_maps = [
+        f for f in all_field_maps
+        if f.left_table == left_table and f.right_table == right_table
+    ]
+    compare_maps = field_map_for_table(all_field_maps, left_table, right_table)
+    key_maps = key_map_for_table(all_field_maps, left_table, right_table)
+
+    if not compare_maps:
+        raise ValueError("No compare field mappings for selected table pair")
+    if not key_maps:
         raise ValueError("No key mappings for selected table pair")
 
-    left_cols = ", ".join([f"{f.left_field}" for f in fmaps])
-    right_cols = ", ".join([f"{f.right_field}" for f in fmaps])
+    left_schema_cols = get_table_columns(left_conn, left_table)
+    right_schema_cols = get_table_columns(right_conn, right_table)
 
-    left_sql = f"SELECT {left_cols} FROM {left_table} LIMIT {int(limit)}"
-    right_sql = f"SELECT {right_cols} FROM {right_table} LIMIT {int(limit)}"
+    mapped_left_fields = {f.left_field for f in pair_field_maps}
+    mapped_right_fields = {f.right_field for f in pair_field_maps}
+    left_only_fields = [c for c in left_schema_cols if c not in mapped_left_fields]
+    right_only_fields = [c for c in right_schema_cols if c not in mapped_right_fields]
+
+    left_key_fields = [k.left_field for k in key_maps]
+    right_key_fields = [k.right_field for k in key_maps]
+
+    left_compare_fields = [f.left_field for f in compare_maps]
+    right_compare_fields = [f.right_field for f in compare_maps]
+
+    left_select_fields = _unique_keep_order(left_key_fields + left_compare_fields)
+    right_select_fields = _unique_keep_order(right_key_fields + right_compare_fields)
+
+    left_sql = f"SELECT {', '.join(left_select_fields)} FROM {left_table} LIMIT {int(limit)}"
+    right_sql = f"SELECT {', '.join(right_select_fields)} FROM {right_table} LIMIT {int(limit)}"
 
     l_cols, l_rows, l_sec = run_query(left_conn, left_sql)
     r_cols, r_rows, r_sec = run_query(right_conn, right_sql)
@@ -54,14 +102,11 @@ def compare_tables(
     left_data = _rows_to_dicts(l_cols, l_rows)
     right_data = _rows_to_dicts(r_cols, r_rows)
 
-    lk = [k.left_field for k in kmaps]
-    rk = [k.right_field for k in kmaps]
+    def lkey(row: dict[str, Any]):
+        return tuple(_normalize(row.get(k), trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in left_key_fields)
 
-    def lkey(row):
-        return tuple(_normalize(row.get(k), trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in lk)
-
-    def rkey(row):
-        return tuple(_normalize(row.get(k), trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in rk)
+    def rkey(row: dict[str, Any]):
+        return tuple(_normalize(row.get(k), trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in right_key_fields)
 
     left_ix = {lkey(row): row for row in left_data}
     right_ix = {rkey(row): row for row in right_data}
@@ -69,21 +114,73 @@ def compare_tables(
     left_keys = set(left_ix)
     right_keys = set(right_ix)
 
-    left_only = [left_ix[k] for k in sorted(left_keys - right_keys)]
-    right_only = [right_ix[k] for k in sorted(right_keys - left_keys)]
+    only_left_rows = [left_ix[k] for k in sorted(left_keys - right_keys)]
+    only_right_rows = [right_ix[k] for k in sorted(right_keys - left_keys)]
 
-    mismatched = []
+    field_differences_rows: list[dict[str, Any]] = []
+    summary_counts: dict[tuple[str, str], int] = {}
+
     for k in sorted(left_keys & right_keys):
         lrow = left_ix[k]
         rrow = right_ix[k]
-        diffs = {}
-        for f in fmaps:
-            lv = _normalize(lrow.get(f.left_field), trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
-            rv = _normalize(rrow.get(f.right_field), trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+
+        key_payload = {lf: lrow.get(lf) for lf in left_key_fields}
+
+        for fm in compare_maps:
+            lv_raw = lrow.get(fm.left_field)
+            rv_raw = rrow.get(fm.right_field)
+            lv = _normalize(lv_raw, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+            rv = _normalize(rv_raw, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
             if lv != rv:
-                diffs[f"{f.left_field} != {f.right_field}"] = {"left": lrow.get(f.left_field), "right": rrow.get(f.right_field)}
-        if diffs:
-            mismatched.append({"key": k, "diffs": diffs, "left": lrow, "right": rrow})
+                out = {
+                    **key_payload,
+                    "field_name": f"{fm.left_field} -> {fm.right_field}",
+                    "left_value": lv_raw,
+                    "right_value": rv_raw,
+                }
+                field_differences_rows.append(out)
+                key = (fm.left_field, fm.right_field)
+                summary_counts[key] = summary_counts.get(key, 0) + 1
+
+    summary_rows = [
+        {"left_field": lf, "right_field": rf, "difference_count": cnt}
+        for (lf, rf), cnt in sorted(summary_counts.items(), key=lambda x: (-x[1], x[0][0], x[0][1]))
+    ]
+
+    # Output workbook
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = out_dir / f"compare_{left_table.replace('.', '_')}__{right_table.replace('.', '_')}__{ts}.xlsx"
+
+    wb = Workbook()
+    ws_left_only = wb.active
+    ws_left_only.title = "only in left"
+    _write_table(ws_left_only, only_left_rows, headers=left_select_fields)
+
+    ws_right_only = wb.create_sheet("only in right")
+    _write_table(ws_right_only, only_right_rows, headers=right_select_fields)
+
+    ws_diffs = wb.create_sheet("field differences")
+    diff_headers = left_key_fields + ["field_name", "left_value", "right_value"]
+    _write_table(ws_diffs, field_differences_rows, headers=diff_headers)
+
+    ws_summary = wb.create_sheet("field difference summary")
+    _write_table(ws_summary, summary_rows, headers=["left_field", "right_field", "difference_count"])
+
+    ws_left_fields = wb.create_sheet("left only fields")
+    _write_table(ws_left_fields, [{"left_field": f} for f in left_only_fields], headers=["left_field"])
+
+    ws_right_fields = wb.create_sheet("right only fields")
+    _write_table(ws_right_fields, [{"right_field": f} for f in right_only_fields], headers=["right_field"])
+
+    ws_left_table = wb.create_sheet(_sheet_name(f"left_{left_table}"))
+    _write_table(ws_left_table, left_data, headers=left_select_fields)
+
+    ws_right_table = wb.create_sheet(_sheet_name(f"right_{right_table}"))
+    _write_table(ws_right_table, right_data, headers=right_select_fields)
+
+    wb.save(out_path)
 
     trace = {
         "left_sql": left_sql if god_mode else "hidden",
@@ -92,18 +189,19 @@ def compare_tables(
         "right_seconds": r_sec,
         "left_rows": len(left_data),
         "right_rows": len(right_data),
-        "key_fields": {"left": lk, "right": rk},
-        "normalization": {
-            "trim_strings": trim_strings,
-            "nullish_equal": nullish_equal,
-            "number_precision": number_precision,
-        },
     }
 
     return {
-        "left_only": left_only,
-        "right_only": right_only,
-        "mismatched": mismatched,
+        "output_file": str(out_path),
+        "counts": {
+            "only_in_left": len(only_left_rows),
+            "only_in_right": len(only_right_rows),
+            "field_differences": len(field_differences_rows),
+        },
+        "unmapped_fields": {
+            "left_only_not_in_field_map": left_only_fields,
+            "right_only_not_in_field_map": right_only_fields,
+        },
         "trace": trace,
     }
 
@@ -122,5 +220,6 @@ def employee_trace(
         "table": table,
         "sql": sql,
         "seconds": sec,
+        "columns": out_cols,
         "rows": _rows_to_dicts(out_cols, rows),
     }
