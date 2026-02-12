@@ -1,0 +1,12 @@
+<!doctype html><html><body>
+<h2>Compare: {{ left_table }} vs {{ right_table }}</h2>
+<h3>Left only ({{ result.left_only|length }})</h3>
+<pre>{{ result.left_only }}</pre>
+<h3>Right only ({{ result.right_only|length }})</h3>
+<pre>{{ result.right_only }}</pre>
+<h3>Mismatched ({{ result.mismatched|length }})</h3>
+<pre>{{ result.mismatched }}</pre>
+<h3>Trace</h3>
+<pre>{{ result.trace }}</pre>
+<p><a href="/">Back</a></p>
+</body></html>

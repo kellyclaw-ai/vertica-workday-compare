@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Vertica Workday Compare</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .box { border:1px solid #ccc; padding:12px; border-radius:8px; }
+    .frame { border:1px solid #ddd; padding:10px; margin:8px 0; }
+    pre { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Vertica Workday Compare (localhost)</h1>
+
+  <div class="grid">
+    <div class="box">
+      <h2>1) Table comparison</h2>
+      <form method="post" action="/compare">
+        <label>Left table</label>
+        <select name="left_table">
+          {% for tm in table_maps %}<option value="{{ tm.left_table }}">{{ tm.left_table }}</option>{% endfor %}
+        </select>
+        <label>Right table</label>
+        <select name="right_table">
+          {% for tm in table_maps %}<option value="{{ tm.right_table }}">{{ tm.right_table }}</option>{% endfor %}
+        </select>
+        <label>Limit</label><input name="limit" type="number" value="500" />
+        <label><input type="checkbox" name="god_mode" {% if god_mode_default %}checked{% endif %}/> God mode</label>
+        <button type="submit">Compare</button>
+      </form>
+      <div id="compare_result"></div>
+    </div>
+
+    <div class="box">
+      <h2>2) Employee trace explorer</h2>
+      <form method="post" action="/trace">
+        <label>employee_id</label>
+        <input name="employee_id" />
+        <label><input type="checkbox" name="god_mode" {% if god_mode_default %}checked{% endif %}/> God mode</label>
+
+        <h3>Tables + field pickers</h3>
+        {% for tm in table_maps %}
+          <div class="frame">
+            <label>
+              <input type="checkbox" name="left_table" value="{{ tm.left_table }}" />
+              {{ tm.left_table }} ↔ {{ tm.right_table }}
+            </label>
+            <div class="grid">
+              <div>
+                <strong>{{ tm.left_table }} fields</strong><br/>
+                <select name="fields_left::{{ tm.left_table }}" multiple size="6">
+                  {% for fm in field_maps %}
+                    {% if fm.left_table == tm.left_table and fm.right_table == tm.right_table %}
+                      <option value="{{ fm.left_field }}">{{ fm.left_field }}</option>
+                    {% endif %}
+                  {% endfor %}
+                </select>
+              </div>
+              <div>
+                <strong>{{ tm.right_table }} fields</strong><br/>
+                <select name="fields_right::{{ tm.right_table }}" multiple size="6">
+                  {% for fm in field_maps %}
+                    {% if fm.left_table == tm.left_table and fm.right_table == tm.right_table %}
+                      <option value="{{ fm.right_field }}">{{ fm.right_field }}</option>
+                    {% endif %}
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+
+        <button type="submit">Trace employee across selected tables</button>
+      </form>
+      <div id="trace_result"></div>
+    </div>
+  </div>
+</body>
+</html>

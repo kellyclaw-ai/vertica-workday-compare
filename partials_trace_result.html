@@ -1,0 +1,23 @@
+<!doctype html><html><body>
+<h2>Employee trace for {{ employee_id }}</h2>
+{% for f in frames %}
+  <div style="border:1px solid #ccc;padding:10px;margin:10px 0;">
+    <h3>{{ f.left_table }} ↔ {{ f.right_table }}</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <div>
+        <h4>LEFT: {{ f.left.table }}</h4>
+        <div>SQL: <code>{{ f.left.sql }}</code></div>
+        <div>Seconds: {{ f.left.seconds }}</div>
+        <pre>{{ f.left.rows }}</pre>
+      </div>
+      <div>
+        <h4>RIGHT: {{ f.right.table }}</h4>
+        <div>SQL: <code>{{ f.right.sql }}</code></div>
+        <div>Seconds: {{ f.right.seconds }}</div>
+        <pre>{{ f.right.rows }}</pre>
+      </div>
+    </div>
+  </div>
+{% endfor %}
+<p><a href="/">Back</a></p>
+</body></html>
