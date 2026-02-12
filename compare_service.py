@@ -10,6 +10,19 @@ def _rows_to_dicts(cols: list[str], rows: list[tuple]) -> list[dict[str, Any]]:
     return [dict(zip(cols, r)) for r in rows]
 
 
+def _normalize(v: Any, *, trim_strings: bool = True, nullish_equal: bool = True, number_precision: int = 6):
+    if v is None:
+        return None
+    if isinstance(v, str):
+        vv = v.strip() if trim_strings else v
+        if nullish_equal and vv == "":
+            return None
+        return vv
+    if isinstance(v, float):
+        return round(v, number_precision)
+    return v
+
+
 def compare_tables(
     left_conn: dict,
     right_conn: dict,
@@ -18,6 +31,9 @@ def compare_tables(
     all_field_maps: list[FieldMap],
     limit: int = 500,
     god_mode: bool = False,
+    trim_strings: bool = True,
+    nullish_equal: bool = True,
+    number_precision: int = 6,
 ) -> dict[str, Any]:
     fmaps = field_map_for_table(all_field_maps, left_table, right_table)
     kmaps = key_map_for_table(all_field_maps, left_table, right_table)
@@ -38,12 +54,17 @@ def compare_tables(
     left_data = _rows_to_dicts(l_cols, l_rows)
     right_data = _rows_to_dicts(r_cols, r_rows)
 
-    # Build key tuples using mapped key fields.
     lk = [k.left_field for k in kmaps]
     rk = [k.right_field for k in kmaps]
 
-    left_ix = {tuple(row.get(k) for k in lk): row for row in left_data}
-    right_ix = {tuple(row.get(k) for k in rk): row for row in right_data}
+    def lkey(row):
+        return tuple(_normalize(row.get(k), trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in lk)
+
+    def rkey(row):
+        return tuple(_normalize(row.get(k), trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in rk)
+
+    left_ix = {lkey(row): row for row in left_data}
+    right_ix = {rkey(row): row for row in right_data}
 
     left_keys = set(left_ix)
     right_keys = set(right_ix)
@@ -57,10 +78,10 @@ def compare_tables(
         rrow = right_ix[k]
         diffs = {}
         for f in fmaps:
-            lv = lrow.get(f.left_field)
-            rv = rrow.get(f.right_field)
+            lv = _normalize(lrow.get(f.left_field), trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+            rv = _normalize(rrow.get(f.right_field), trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
             if lv != rv:
-                diffs[f"{f.left_field} != {f.right_field}"] = {"left": lv, "right": rv}
+                diffs[f"{f.left_field} != {f.right_field}"] = {"left": lrow.get(f.left_field), "right": rrow.get(f.right_field)}
         if diffs:
             mismatched.append({"key": k, "diffs": diffs, "left": lrow, "right": rrow})
 
@@ -72,6 +93,11 @@ def compare_tables(
         "left_rows": len(left_data),
         "right_rows": len(right_data),
         "key_fields": {"left": lk, "right": rk},
+        "normalization": {
+            "trim_strings": trim_strings,
+            "nullish_equal": nullish_equal,
+            "number_precision": number_precision,
+        },
     }
 
     return {

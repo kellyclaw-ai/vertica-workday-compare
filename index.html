@@ -8,36 +8,89 @@
     .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .box { border:1px solid #ccc; padding:12px; border-radius:8px; }
     .frame { border:1px solid #ddd; padding:10px; margin:8px 0; }
-    pre { white-space: pre-wrap; }
+    pre { white-space: pre-wrap; max-height: 250px; overflow:auto; }
+    .small { font-size: 12px; color:#444; }
   </style>
 </head>
 <body>
   <h1>Vertica Workday Compare (localhost)</h1>
+
+  <div class="box" style="margin-bottom:16px;">
+    <h2>Saved jobs</h2>
+    <ul>
+      {% for j in jobs %}
+        <li>
+          <strong>#{{ j.id }}</strong> [{{ j.job_type }}] {{ j.name }}
+          <form method="post" action="/jobs/{{ j.id }}/run" style="display:inline;">
+            <button type="submit">Run metadata replay</button>
+          </form>
+        </li>
+      {% else %}
+        <li>No jobs yet.</li>
+      {% endfor %}
+    </ul>
+  </div>
 
   <div class="grid">
     <div class="box">
       <h2>1) Table comparison</h2>
       <form method="post" action="/compare">
         <label>Left table</label>
-        <select name="left_table">
+        <select name="left_table" id="cmp_left">
           {% for tm in table_maps %}<option value="{{ tm.left_table }}">{{ tm.left_table }}</option>{% endfor %}
         </select>
         <label>Right table</label>
-        <select name="right_table">
+        <select name="right_table" id="cmp_right">
           {% for tm in table_maps %}<option value="{{ tm.right_table }}">{{ tm.right_table }}</option>{% endfor %}
         </select>
         <label>Limit</label><input name="limit" type="number" value="500" />
+        <div class="small">Stronger diff options:</div>
+        <label><input type="checkbox" name="trim_strings" checked /> Trim strings</label>
+        <label><input type="checkbox" name="nullish_equal" checked /> Treat empty string as null</label>
+        <label>Number precision</label><input name="number_precision" type="number" value="6" />
         <label><input type="checkbox" name="god_mode" {% if god_mode_default %}checked{% endif %}/> God mode</label>
         <button type="submit">Compare</button>
       </form>
-      <div id="compare_result"></div>
+
+      <form method="get" action="/introspect" style="margin-top:8px;">
+        <input type="hidden" name="left_table" id="i_left" />
+        <input type="hidden" name="right_table" id="i_right" />
+        <button type="submit" onclick="document.getElementById('i_left').value=document.getElementById('cmp_left').value;document.getElementById('i_right').value=document.getElementById('cmp_right').value;">Schema introspect + mapping suggestions (JSON)</button>
+      </form>
+
+      <form method="post" action="/compare/export" style="margin-top:8px;">
+        <label>Export left table</label>
+        <select name="left_table">{% for tm in table_maps %}<option value="{{ tm.left_table }}">{{ tm.left_table }}</option>{% endfor %}</select>
+        <label>Export right table</label>
+        <select name="right_table">{% for tm in table_maps %}<option value="{{ tm.right_table }}">{{ tm.right_table }}</option>{% endfor %}</select>
+        <input name="limit" type="number" value="500" />
+        <select name="fmt"><option value="xlsx">xlsx</option><option value="csv">csv</option></select>
+        <button type="submit">Export diff</button>
+      </form>
+
+      <form method="post" action="/jobs/save" style="margin-top:8px;">
+        <input type="hidden" name="job_type" value="compare" />
+        <input name="name" placeholder="save compare job name" />
+        <select name="left_table">{% for tm in table_maps %}<option value="{{ tm.left_table }}">{{ tm.left_table }}</option>{% endfor %}</select>
+        <select name="right_table">{% for tm in table_maps %}<option value="{{ tm.right_table }}">{{ tm.right_table }}</option>{% endfor %}</select>
+        <input name="limit" type="number" value="500" />
+        <button type="submit">Save compare job</button>
+      </form>
+
+      {% if compare_result %}
+        <h3>Compare: {{ compare_result.left_table }} vs {{ compare_result.right_table }}</h3>
+        <h4>Left only ({{ compare_result.result.left_only|length }})</h4><pre>{{ compare_result.result.left_only }}</pre>
+        <h4>Right only ({{ compare_result.result.right_only|length }})</h4><pre>{{ compare_result.result.right_only }}</pre>
+        <h4>Mismatched ({{ compare_result.result.mismatched|length }})</h4><pre>{{ compare_result.result.mismatched }}</pre>
+        <h4>Trace</h4><pre>{{ compare_result.result.trace }}</pre>
+      {% endif %}
     </div>
 
     <div class="box">
       <h2>2) Employee trace explorer</h2>
       <form method="post" action="/trace">
         <label>employee_id</label>
-        <input name="employee_id" />
+        <input name="employee_id" value="{{ employee_id }}" />
         <label><input type="checkbox" name="god_mode" {% if god_mode_default %}checked{% endif %}/> God mode</label>
 
         <h3>Tables + field pickers</h3>
@@ -74,7 +127,32 @@
 
         <button type="submit">Trace employee across selected tables</button>
       </form>
-      <div id="trace_result"></div>
+
+      <form method="post" action="/jobs/save" style="margin-top:8px;">
+        <input type="hidden" name="job_type" value="trace" />
+        <input name="name" placeholder="save trace job name" />
+        <button type="submit">Save trace job (metadata)</button>
+      </form>
+
+      {% for f in trace_frames %}
+      <div class="frame">
+        <h3>{{ f.left_table }} ↔ {{ f.right_table }}</h3>
+        <div class="grid">
+          <div>
+            <h4>LEFT: {{ f.left.table }}</h4>
+            <div>SQL: <code>{{ f.left.sql }}</code></div>
+            <div>Seconds: {{ f.left.seconds }}</div>
+            <pre>{{ f.left.rows }}</pre>
+          </div>
+          <div>
+            <h4>RIGHT: {{ f.right.table }}</h4>
+            <div>SQL: <code>{{ f.right.sql }}</code></div>
+            <div>Seconds: {{ f.right.seconds }}</div>
+            <pre>{{ f.right.rows }}</pre>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
     </div>
   </div>
 </body>
