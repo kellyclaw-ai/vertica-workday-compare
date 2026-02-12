@@ -53,6 +53,18 @@ def introspect(left_table: str, right_table: str):
     left_cols = get_table_columns(_conn_left(), left_table)
     right_cols = get_table_columns(_conn_right(), right_table)
 
+    _, all_field_maps = load_mapping(settings.mapping_file)
+    pair_field_maps = [
+        f for f in all_field_maps
+        if f.left_table == left_table and f.right_table == right_table
+    ]
+
+    mapped_left_fields = {f.left_field for f in pair_field_maps}
+    mapped_right_fields = {f.right_field for f in pair_field_maps}
+
+    left_unmapped = [c for c in left_cols if c not in mapped_left_fields]
+    right_unmapped = [c for c in right_cols if c not in mapped_right_fields]
+
     def norm(n: str) -> str:
         return re.sub(r"[^a-z0-9]", "", n.lower())
 
@@ -69,6 +81,23 @@ def introspect(left_table: str, right_table: str):
             "right_table": right_table,
             "left_columns": left_cols,
             "right_columns": right_cols,
+            "field_map_pairs": [
+                {
+                    "left_field": f.left_field,
+                    "right_field": f.right_field,
+                    "is_key": f.is_key,
+                    "compare": f.compare,
+                }
+                for f in pair_field_maps
+            ],
+            "unmapped_fields": {
+                "left_only_not_in_field_map": left_unmapped,
+                "right_only_not_in_field_map": right_unmapped,
+                "either_side_not_in_field_map": {
+                    "left": left_unmapped,
+                    "right": right_unmapped,
+                },
+            },
             "suggested_field_mappings": suggestions,
         }
     )
