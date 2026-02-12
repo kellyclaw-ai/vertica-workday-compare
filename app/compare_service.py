@@ -119,6 +119,8 @@ def compare_tables(
     right_table: str,
     all_field_maps: list[FieldMap],
     employee_id: str | None = None,
+    sample_employee_ids: bool = False,
+    sample_size: int = 100,
     god_mode: bool = False,
     trim_strings: bool = True,
     nullish_equal: bool = True,
@@ -163,14 +165,32 @@ def compare_tables(
     left_params: tuple | None = None
     right_params: tuple | None = None
 
+    lk_emp = next((k for k in left_key_fields if k.lower() == "employee_id"), None)
+    rk_emp = next((k for k in right_key_fields if k.lower() == "employee_id"), None)
+
     if employee_id:
-        lk_emp = next((k for k in left_key_fields if k.lower() == "employee_id"), None)
-        rk_emp = next((k for k in right_key_fields if k.lower() == "employee_id"), None)
         if lk_emp and rk_emp:
             left_sql += f" WHERE {_quote_ident(lk_emp)} = %s"
             right_sql += f" WHERE {_quote_ident(rk_emp)} = %s"
             left_params = (employee_id,)
             right_params = (employee_id,)
+    elif sample_employee_ids and lk_emp and rk_emp:
+        sample_n = max(1, int(sample_size))
+        sample_sql = (
+            f"SELECT DISTINCT {_quote_ident(lk_emp)} "
+            f"FROM {_quote_table(left_table)} "
+            f"WHERE {_quote_ident(lk_emp)} IS NOT NULL "
+            f"ORDER BY RANDOM() LIMIT {sample_n}"
+        )
+        s_cols, s_rows, _ = run_query(left_conn, sample_sql)
+        sampled_ids = [r[s_cols.index(lk_emp)] for r in s_rows] if s_rows else []
+
+        if sampled_ids:
+            placeholders = ", ".join(["%s"] * len(sampled_ids))
+            left_sql += f" WHERE {_quote_ident(lk_emp)} IN ({placeholders})"
+            right_sql += f" WHERE {_quote_ident(rk_emp)} IN ({placeholders})"
+            left_params = tuple(sampled_ids)
+            right_params = tuple(sampled_ids)
 
     l_cols, l_rows, l_sec = run_query(left_conn, left_sql, left_params)
     r_cols, r_rows, r_sec = run_query(right_conn, right_sql, right_params)
@@ -277,6 +297,8 @@ def compare_tables(
         "right_seconds": r_sec,
         "left_rows": len(left_data),
         "right_rows": len(right_data),
+        "sample_employee_ids": bool(sample_employee_ids and not employee_id and lk_emp and rk_emp),
+        "sample_size_requested": int(sample_size),
     }
 
     return {

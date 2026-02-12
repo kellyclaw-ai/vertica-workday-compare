@@ -45,8 +45,10 @@
         <div class="col">
           <label>employee_id (optional filter)</label><br/>
           <input name="employee_id" value="{{ compare_result.employee_id if compare_result else '' }}" />
+          <div class="small">If set, this overrides random sampling.</div>
         </div>
         <div class="col">
+          <label><input type="checkbox" name="sample_employee_ids" {% if compare_result and compare_result.sample_employee_ids %}checked{% endif %}/> Random sample 100 distinct employee_ids</label><br/>
           <label><input type="checkbox" name="trim_strings" checked /> Trim strings</label><br/>
           <label><input type="checkbox" name="nullish_equal" checked /> Treat empty string as null</label><br/>
           <label>Number precision</label>
@@ -72,6 +74,9 @@
         only in right: <strong>{{ compare_result.result.counts.only_in_right }}</strong> |
         field differences: <strong>{{ compare_result.result.counts.field_differences }}</strong>
       </p>
+      {% if compare_result.result.trace.sample_employee_ids %}
+        <p class="small">Compared using random sample of up to {{ compare_result.result.trace.sample_size_requested }} distinct employee_ids.</p>
+      {% endif %}
 
       <h4>Unmapped fields (present in schema but not in field_map)</h4>
       <table>
