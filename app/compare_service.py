@@ -11,6 +11,17 @@ from app.mapping_store import field_map_for_table, key_map_for_table
 from app.models import FieldMap
 
 
+def _quote_ident(name: str) -> str:
+    # ANSI SQL identifier quoting with escaped double-quotes.
+    # Allows spaces, reserved keywords, plus signs, etc. safely.
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _quote_table(table_name: str) -> str:
+    # Quote each dotted identifier part: schema.table -> "schema"."table"
+    return ".".join(_quote_ident(part) for part in table_name.split("."))
+
+
 def _looks_datetime_field(field_name: str) -> bool:
     n = field_name.lower()
     tokens = ("date", "time", "timestamp", "datetime", "_dt", "_dttm")
@@ -143,8 +154,11 @@ def compare_tables(
     left_select_fields = _unique_keep_order(left_key_fields + left_compare_fields)
     right_select_fields = _unique_keep_order(right_key_fields + right_compare_fields)
 
-    left_sql = f"SELECT {', '.join(left_select_fields)} FROM {left_table}"
-    right_sql = f"SELECT {', '.join(right_select_fields)} FROM {right_table}"
+    left_cols_sql = ", ".join(_quote_ident(c) for c in left_select_fields)
+    right_cols_sql = ", ".join(_quote_ident(c) for c in right_select_fields)
+
+    left_sql = f"SELECT {left_cols_sql} FROM {_quote_table(left_table)}"
+    right_sql = f"SELECT {right_cols_sql} FROM {_quote_table(right_table)}"
 
     left_params: tuple | None = None
     right_params: tuple | None = None
@@ -153,8 +167,8 @@ def compare_tables(
         lk_emp = next((k for k in left_key_fields if k.lower() == "employee_id"), None)
         rk_emp = next((k for k in right_key_fields if k.lower() == "employee_id"), None)
         if lk_emp and rk_emp:
-            left_sql += f" WHERE {lk_emp} = %s"
-            right_sql += f" WHERE {rk_emp} = %s"
+            left_sql += f" WHERE {_quote_ident(lk_emp)} = %s"
+            right_sql += f" WHERE {_quote_ident(rk_emp)} = %s"
             left_params = (employee_id,)
             right_params = (employee_id,)
 
@@ -287,8 +301,8 @@ def employee_trace(
     fields: list[str],
     employee_field_name: str,
 ) -> dict[str, Any]:
-    cols = ", ".join(fields) if fields else "*"
-    sql = f"SELECT {cols} FROM {table} WHERE {employee_field_name} = %s LIMIT 200"
+    cols = ", ".join(_quote_ident(c) for c in fields) if fields else "*"
+    sql = f"SELECT {cols} FROM {_quote_table(table)} WHERE {_quote_ident(employee_field_name)} = %s LIMIT 200"
     out_cols, rows, sec = run_query(conn, sql, (employee_id,))
     return {
         "table": table,
