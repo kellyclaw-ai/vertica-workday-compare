@@ -7,7 +7,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.compare_service import compare_tables, employee_trace
 from app.db import get_table_columns
-from app.mapping_store import load_mapping, field_map_for_table
+from app.mapping_store import load_mapping, field_map_for_table, key_map_for_table
 from app.settings import settings
 
 app = FastAPI(title="Vertica Workday Compare")
@@ -169,6 +169,10 @@ async def trace_ui(request: Request):
         if not tm:
             continue
         fmaps = field_map_for_table(field_maps, tm.left_table, tm.right_table)
+        kmaps = key_map_for_table(field_maps, tm.left_table, tm.right_table)
+        left_keys = [k.left_field for k in kmaps]
+        right_keys = [k.right_field for k in kmaps]
+
         l_fields_all = [f.left_field for f in fmaps]
         r_fields_all = [f.right_field for f in fmaps]
 
@@ -178,14 +182,34 @@ async def trace_ui(request: Request):
         l_fields = selected_left_fields or l_fields_all
         r_fields = selected_right_fields or r_fields_all
 
-        # Prefer source/table column order when building selected field lists
+        # Ensure key fields are present and at the beginning
+        l_fields = left_keys + [f for f in l_fields if f not in set(left_keys)]
+        r_fields = right_keys + [f for f in r_fields if f not in set(right_keys)]
+
+        # Prefer source/table column order while keeping keys first
         left_order = get_table_columns(_conn_left(), tm.left_table)
         right_order = get_table_columns(_conn_right(), tm.right_table)
-        l_fields = [c for c in left_order if c in set(l_fields)] if left_order else l_fields
-        r_fields = [c for c in right_order if c in set(r_fields)] if right_order else r_fields
+        if left_order:
+            l_nonkeys = [c for c in left_order if c in set(l_fields) and c not in set(left_keys)]
+            l_fields = left_keys + l_nonkeys
+        if right_order:
+            r_nonkeys = [c for c in right_order if c in set(r_fields) and c not in set(right_keys)]
+            r_fields = right_keys + r_nonkeys
 
         left_frame = employee_trace(_conn_left(), tm.left_table, employee_id, l_fields, "employee_id")
         right_frame = employee_trace(_conn_right(), tm.right_table, employee_id, r_fields, "employee_id")
+
+        # Sort trace rows by primary keys (if available)
+        if left_keys and left_frame.get("rows"):
+            left_frame["rows"] = sorted(
+                left_frame["rows"],
+                key=lambda r: tuple(str(r.get(k, "")) for k in left_keys),
+            )
+        if right_keys and right_frame.get("rows"):
+            right_frame["rows"] = sorted(
+                right_frame["rows"],
+                key=lambda r: tuple(str(r.get(k, "")) for k in right_keys),
+            )
 
         if not god_mode:
             left_frame["sql"] = "hidden"

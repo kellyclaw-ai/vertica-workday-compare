@@ -205,6 +205,10 @@ def compare_tables(
     def rkey(row: dict[str, Any]):
         return tuple(_normalize(row.get(k), field_name=k, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in right_key_fields)
 
+    # Keep table outputs sorted by key
+    left_data = sorted(left_data, key=lkey)
+    right_data = sorted(right_data, key=rkey)
+
     left_ix = {lkey(row): row for row in left_data}
     right_ix = {rkey(row): row for row in right_data}
 
