@@ -79,6 +79,34 @@
 
       {% if compare_result %}
         <h3>Compare: {{ compare_result.left_table }} vs {{ compare_result.right_table }}</h3>
+
+        <h4>Unmapped fields (present in schema but not in field_map)</h4>
+        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse; width: 100%; margin-bottom: 12px;">
+          <thead>
+            <tr>
+              <th style="text-align:left;">Left table: not in field_map</th>
+              <th style="text-align:left;">Right table: not in field_map</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% set left_unmapped = compare_result.unmapped_fields.left_only_not_in_field_map %}
+            {% set right_unmapped = compare_result.unmapped_fields.right_only_not_in_field_map %}
+            {% set max_rows = [left_unmapped|length, right_unmapped|length]|max %}
+            {% if max_rows == 0 %}
+              <tr>
+                <td colspan="2"><em>No unmapped fields found for this table pair.</em></td>
+              </tr>
+            {% else %}
+              {% for i in range(max_rows) %}
+                <tr>
+                  <td>{{ left_unmapped[i] if i < (left_unmapped|length) else "" }}</td>
+                  <td>{{ right_unmapped[i] if i < (right_unmapped|length) else "" }}</td>
+                </tr>
+              {% endfor %}
+            {% endif %}
+          </tbody>
+        </table>
+
         <h4>Left only ({{ compare_result.result.left_only|length }})</h4><pre>{{ compare_result.result.left_only }}</pre>
         <h4>Right only ({{ compare_result.result.right_only|length }})</h4><pre>{{ compare_result.result.right_only }}</pre>
         <h4>Mismatched ({{ compare_result.result.mismatched|length }})</h4><pre>{{ compare_result.result.mismatched }}</pre>

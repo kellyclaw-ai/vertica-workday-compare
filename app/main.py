@@ -26,6 +26,32 @@ def _conn_right() -> dict:
     return settings.right.model_dump()
 
 
+def _unmapped_fields_report(left_table: str, right_table: str) -> dict:
+    left_cols = get_table_columns(_conn_left(), left_table)
+    right_cols = get_table_columns(_conn_right(), right_table)
+
+    _, all_field_maps = load_mapping(settings.mapping_file)
+    pair_field_maps = [
+        f for f in all_field_maps
+        if f.left_table == left_table and f.right_table == right_table
+    ]
+
+    mapped_left_fields = {f.left_field for f in pair_field_maps}
+    mapped_right_fields = {f.right_field for f in pair_field_maps}
+
+    left_unmapped = [c for c in left_cols if c not in mapped_left_fields]
+    right_unmapped = [c for c in right_cols if c not in mapped_right_fields]
+
+    return {
+        "left_only_not_in_field_map": left_unmapped,
+        "right_only_not_in_field_map": right_unmapped,
+        "either_side_not_in_field_map": {
+            "left": left_unmapped,
+            "right": right_unmapped,
+        },
+    }
+
+
 def _render_home(request: Request, compare_result=None, trace_frames=None, employee_id=""):
     table_maps, field_maps = load_mapping(settings.mapping_file)
     return templates.TemplateResponse(
@@ -59,11 +85,7 @@ def introspect(left_table: str, right_table: str):
         if f.left_table == left_table and f.right_table == right_table
     ]
 
-    mapped_left_fields = {f.left_field for f in pair_field_maps}
-    mapped_right_fields = {f.right_field for f in pair_field_maps}
-
-    left_unmapped = [c for c in left_cols if c not in mapped_left_fields]
-    right_unmapped = [c for c in right_cols if c not in mapped_right_fields]
+    unmapped_fields = _unmapped_fields_report(left_table, right_table)
 
     def norm(n: str) -> str:
         return re.sub(r"[^a-z0-9]", "", n.lower())
@@ -90,14 +112,7 @@ def introspect(left_table: str, right_table: str):
                 }
                 for f in pair_field_maps
             ],
-            "unmapped_fields": {
-                "left_only_not_in_field_map": left_unmapped,
-                "right_only_not_in_field_map": right_unmapped,
-                "either_side_not_in_field_map": {
-                    "left": left_unmapped,
-                    "right": right_unmapped,
-                },
-            },
+            "unmapped_fields": unmapped_fields,
             "suggested_field_mappings": suggestions,
         }
     )
@@ -127,7 +142,16 @@ def compare_ui(
         nullish_equal,
         number_precision,
     )
-    return _render_home(request, compare_result={"left_table": left_table, "right_table": right_table, "result": result})
+    unmapped_fields = _unmapped_fields_report(left_table, right_table)
+    return _render_home(
+        request,
+        compare_result={
+            "left_table": left_table,
+            "right_table": right_table,
+            "result": result,
+            "unmapped_fields": unmapped_fields,
+        },
+    )
 
 
 @app.post("/compare/export")
