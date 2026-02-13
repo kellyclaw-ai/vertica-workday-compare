@@ -118,70 +118,42 @@
         </div>
       </div>
 
-      <h3>Right-side tables</h3>
+      <h3>Tables (left + right)</h3>
       <div class="frame frame-scroll">
-        <div class="small">Select tables from the RIGHT environment/schema. (Left table is inferred from mapping when available.)</div>
-        {% for rt in right_schema_tables %}
+        <div class="small">Select any tables (LEFT and/or RIGHT). Output shows only the table you selected.</div>
+        {% for t in trace_table_refs %}
           <label style="display:block; margin: 4px 0;">
-            <input type="checkbox" name="right_table" value="{{ rt }}" />
-            {{ rt }}
+            <input type="checkbox" name="table_ref" value="{{ t.side }}|{{ t.table }}" />
+            [{{ t.side|upper }}] {{ t.table }}
           </label>
         {% endfor %}
       </div>
 
-      <button type="submit">Trace employee across selected RIGHT tables</button>
+      <button type="submit">Trace employee across selected tables</button>
     </form>
 
     {% for f in trace_frames %}
-      <div class="frame">
-        <h3>{{ f.left_table }} ↔ {{ f.right_table }}</h3>
-
-        <div class="frame frame-scroll">
-          <h4>LEFT: {{ f.left.table }}</h4>
-          <div>SQL: <code>{{ f.left.sql }}</code></div>
-          <div>Seconds: {{ f.left.seconds }}</div>
-          <div class="table-scroll">
-            <table>
-              <thead>
+      <div class="frame frame-scroll">
+        <h3>[{{ f.side|upper }}] {{ f.table }}</h3>
+        <div>SQL: <code>{{ f.frame.sql }}</code></div>
+        <div>Seconds: {{ f.frame.seconds }}</div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                {% for c in f.frame.columns %}<th>{{ c }}</th>{% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in f.frame.rows %}
                 <tr>
-                  {% for c in f.left.columns %}<th>{{ c }}</th>{% endfor %}
+                  {% for c in f.frame.columns %}<td>{{ row[c] }}</td>{% endfor %}
                 </tr>
-              </thead>
-              <tbody>
-                {% for row in f.left.rows %}
-                  <tr>
-                    {% for c in f.left.columns %}<td>{{ row[c] }}</td>{% endfor %}
-                  </tr>
-                {% else %}
-                  <tr><td colspan="{{ f.left.columns|length if f.left.columns else 1 }}"><em>No rows</em></td></tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="frame frame-scroll">
-          <h4>RIGHT: {{ f.right.table }}</h4>
-          <div>SQL: <code>{{ f.right.sql }}</code></div>
-          <div>Seconds: {{ f.right.seconds }}</div>
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  {% for c in f.right.columns %}<th>{{ c }}</th>{% endfor %}
-                </tr>
-              </thead>
-              <tbody>
-                {% for row in f.right.rows %}
-                  <tr>
-                    {% for c in f.right.columns %}<td>{{ row[c] }}</td>{% endfor %}
-                  </tr>
-                {% else %}
-                  <tr><td colspan="{{ f.right.columns|length if f.right.columns else 1 }}"><em>No rows</em></td></tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
+              {% else %}
+                <tr><td colspan="{{ f.frame.columns|length if f.frame.columns else 1 }}"><em>No rows</em></td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
       </div>
     {% endfor %}

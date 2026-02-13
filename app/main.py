@@ -51,21 +51,36 @@ def _unmapped_fields_report(left_table: str, right_table: str) -> dict:
 def _render_home(request: Request, compare_result=None, trace_frames=None, employee_id=""):
     table_maps, field_maps, value_maps = load_mapping(settings.mapping_file)
 
-    # Right-side schema tables list (used by trace explorer)
+    # Schema table lists (used by trace explorer)
+    left_schema = None
     right_schema = None
-    if table_maps and table_maps[0].right_table and "." in table_maps[0].right_table:
-        right_schema = table_maps[0].right_table.split(".", 1)[0]
+    if table_maps:
+        if table_maps[0].left_table and "." in table_maps[0].left_table:
+            left_schema = table_maps[0].left_table.split(".", 1)[0]
+        if table_maps[0].right_table and "." in table_maps[0].right_table:
+            right_schema = table_maps[0].right_table.split(".", 1)[0]
 
-    right_schema_tables = []
+    left_schema_tables: list[str] = []
+    right_schema_tables: list[str] = []
+    if left_schema:
+        try:
+            left_schema_tables = get_schema_tables(_conn_left(), left_schema)
+        except Exception:
+            left_schema_tables = []
     if right_schema:
         try:
             right_schema_tables = get_schema_tables(_conn_right(), right_schema)
         except Exception:
             right_schema_tables = []
 
-    # Fallback: use only mapped right tables
+    # Fallbacks: use mapped tables only
+    if not left_schema_tables:
+        left_schema_tables = sorted({tm.left_table for tm in table_maps if tm.left_table})
     if not right_schema_tables:
         right_schema_tables = sorted({tm.right_table for tm in table_maps if tm.right_table})
+
+    trace_table_refs = ([{"side": "left", "table": t} for t in left_schema_tables]
+                        + [{"side": "right", "table": t} for t in right_schema_tables])
 
     return templates.TemplateResponse(
         "index.html",
@@ -74,7 +89,7 @@ def _render_home(request: Request, compare_result=None, trace_frames=None, emplo
             "table_maps": table_maps,
             "field_maps": field_maps,
             "value_maps": value_maps,
-            "right_schema_tables": right_schema_tables,
+            "trace_table_refs": trace_table_refs,
             "god_mode_default": settings.god_mode_default,
             "compare_result": compare_result,
             "trace_frames": trace_frames or [],
@@ -180,57 +195,36 @@ async def trace_ui(request: Request):
     employee_id = str(form.get("employee_id", "")).strip()
     god_mode = str(form.get("god_mode", "")).lower() in {"on", "true", "1", "yes"}
 
-    table_maps, field_maps, _value_maps = load_mapping(settings.mapping_file)
-    selected_right_tables = form.getlist("right_table")
+    _table_maps, _field_maps, _value_maps = load_mapping(settings.mapping_file)
+    selected_refs = form.getlist("table_ref")
 
     frames = []
-    for rt in selected_right_tables:
-        tm = next((t for t in table_maps if t.right_table == rt), None)
-        if not tm:
-            # Not mapped; skip for now (trace is designed to show left/right).
+    for ref in selected_refs:
+        # ref format: "left|schema.table" or "right|schema.table"
+        if "|" not in ref:
             continue
+        side, table = ref.split("|", 1)
+        side = side.strip().lower()
+        table = table.strip()
 
-        fmaps = field_map_for_table(field_maps, tm.left_table, tm.right_table)
-        kmaps = key_map_for_table(field_maps, tm.left_table, tm.right_table)
-        left_keys = [k.left_field for k in kmaps]
-        right_keys = [k.right_field for k in kmaps]
+        conn = _conn_left() if side == "left" else _conn_right()
 
-        l_fields = [f.left_field for f in fmaps]
-        r_fields = [f.right_field for f in fmaps]
+        # Prefer source order (schema order). Ensure employee_id first when present.
+        cols = get_table_columns(conn, table)
+        if cols and any(c.lower() == "employee_id" for c in cols):
+            cols = [c for c in cols if c.lower() == "employee_id"] + [c for c in cols if c.lower() != "employee_id"]
 
-        # Ensure key fields are present and at the beginning
-        l_fields = left_keys + [f for f in l_fields if f not in set(left_keys)]
-        r_fields = right_keys + [f for f in r_fields if f not in set(right_keys)]
+        frame = employee_trace(conn, table, employee_id, cols, "employee_id")
 
-        # Prefer source/table column order while keeping keys first
-        left_order = get_table_columns(_conn_left(), tm.left_table)
-        right_order = get_table_columns(_conn_right(), tm.right_table)
-        if left_order:
-            l_nonkeys = [c for c in left_order if c in set(l_fields) and c not in set(left_keys)]
-            l_fields = left_keys + l_nonkeys
-        if right_order:
-            r_nonkeys = [c for c in right_order if c in set(r_fields) and c not in set(right_keys)]
-            r_fields = right_keys + r_nonkeys
-
-        left_frame = employee_trace(_conn_left(), tm.left_table, employee_id, l_fields, "employee_id")
-        right_frame = employee_trace(_conn_right(), tm.right_table, employee_id, r_fields, "employee_id")
-
-        # Sort trace rows by primary keys (if available)
-        if left_keys and left_frame.get("rows"):
-            left_frame["rows"] = sorted(
-                left_frame["rows"],
-                key=lambda r: tuple(str(r.get(k, "")) for k in left_keys),
-            )
-        if right_keys and right_frame.get("rows"):
-            right_frame["rows"] = sorted(
-                right_frame["rows"],
-                key=lambda r: tuple(str(r.get(k, "")) for k in right_keys),
-            )
+        # Sort rows by employee_id if present
+        if frame.get("rows") and frame.get("columns"):
+            if any(c.lower() == "employee_id" for c in frame["columns"]):
+                emp_col = next(c for c in frame["columns"] if c.lower() == "employee_id")
+                frame["rows"] = sorted(frame["rows"], key=lambda r: str(r.get(emp_col, "")))
 
         if not god_mode:
-            left_frame["sql"] = "hidden"
-            right_frame["sql"] = "hidden"
+            frame["sql"] = "hidden"
 
-        frames.append({"left_table": tm.left_table, "right_table": tm.right_table, "left": left_frame, "right": right_frame})
+        frames.append({"side": side, "table": table, "frame": frame})
 
     return _render_home(request, trace_frames=frames, employee_id=employee_id)
