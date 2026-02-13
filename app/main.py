@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from app.compare_service import compare_tables, employee_trace
-from app.db import get_table_columns
+from app.db import get_table_columns, get_schema_tables
 from app.mapping_store import load_mapping, field_map_for_table, key_map_for_table
 from app.settings import settings
 
@@ -50,6 +50,23 @@ def _unmapped_fields_report(left_table: str, right_table: str) -> dict:
 
 def _render_home(request: Request, compare_result=None, trace_frames=None, employee_id=""):
     table_maps, field_maps, value_maps = load_mapping(settings.mapping_file)
+
+    # Right-side schema tables list (used by trace explorer)
+    right_schema = None
+    if table_maps and table_maps[0].right_table and "." in table_maps[0].right_table:
+        right_schema = table_maps[0].right_table.split(".", 1)[0]
+
+    right_schema_tables = []
+    if right_schema:
+        try:
+            right_schema_tables = get_schema_tables(_conn_right(), right_schema)
+        except Exception:
+            right_schema_tables = []
+
+    # Fallback: use only mapped right tables
+    if not right_schema_tables:
+        right_schema_tables = sorted({tm.right_table for tm in table_maps if tm.right_table})
+
     return templates.TemplateResponse(
         "index.html",
         {
@@ -57,6 +74,7 @@ def _render_home(request: Request, compare_result=None, trace_frames=None, emplo
             "table_maps": table_maps,
             "field_maps": field_maps,
             "value_maps": value_maps,
+            "right_schema_tables": right_schema_tables,
             "god_mode_default": settings.god_mode_default,
             "compare_result": compare_result,
             "trace_frames": trace_frames or [],
@@ -162,27 +180,23 @@ async def trace_ui(request: Request):
     employee_id = str(form.get("employee_id", "")).strip()
     god_mode = str(form.get("god_mode", "")).lower() in {"on", "true", "1", "yes"}
 
-    table_maps, field_maps = load_mapping(settings.mapping_file)
-    selected_tables = form.getlist("left_table")
+    table_maps, field_maps, _value_maps = load_mapping(settings.mapping_file)
+    selected_right_tables = form.getlist("right_table")
 
     frames = []
-    for lt in selected_tables:
-        tm = next((t for t in table_maps if t.left_table == lt), None)
+    for rt in selected_right_tables:
+        tm = next((t for t in table_maps if t.right_table == rt), None)
         if not tm:
+            # Not mapped; skip for now (trace is designed to show left/right).
             continue
+
         fmaps = field_map_for_table(field_maps, tm.left_table, tm.right_table)
         kmaps = key_map_for_table(field_maps, tm.left_table, tm.right_table)
         left_keys = [k.left_field for k in kmaps]
         right_keys = [k.right_field for k in kmaps]
 
-        l_fields_all = [f.left_field for f in fmaps]
-        r_fields_all = [f.right_field for f in fmaps]
-
-        selected_left_fields = form.getlist(f"fields_left::{tm.left_table}")
-        selected_right_fields = form.getlist(f"fields_right::{tm.right_table}")
-
-        l_fields = selected_left_fields or l_fields_all
-        r_fields = selected_right_fields or r_fields_all
+        l_fields = [f.left_field for f in fmaps]
+        r_fields = [f.right_field for f in fmaps]
 
         # Ensure key fields are present and at the beginning
         l_fields = left_keys + [f for f in l_fields if f not in set(left_keys)]

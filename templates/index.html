@@ -118,47 +118,18 @@
         </div>
       </div>
 
-      <h3>Tables + field pickers</h3>
-      {% if value_maps %}
-        <div class="frame">
-          <strong>Value map rules loaded:</strong> {{ value_maps|length }}
-          <div class="small">Sheet: <code>value_map</code> (columns: table, field, table_value, canonical_value)</div>
-        </div>
-      {% endif %}
-
-      {% for tm in table_maps %}
-        <div class="frame">
-          <label>
-            <input type="checkbox" name="left_table" value="{{ tm.left_table }}" />
-            {{ tm.left_table }} ↔ {{ tm.right_table }}
+      <h3>Right-side tables</h3>
+      <div class="frame frame-scroll">
+        <div class="small">Select tables from the RIGHT environment/schema. (Left table is inferred from mapping when available.)</div>
+        {% for rt in right_schema_tables %}
+          <label style="display:block; margin: 4px 0;">
+            <input type="checkbox" name="right_table" value="{{ rt }}" />
+            {{ rt }}
           </label>
+        {% endfor %}
+      </div>
 
-          <div class="row" style="margin-top:8px;">
-            <div class="col">
-              <strong>{{ tm.left_table }} fields</strong><br/>
-              <select name="fields_left::{{ tm.left_table }}" multiple size="8" style="width:100%;">
-                {% for fm in field_maps %}
-                  {% if fm.left_table == tm.left_table and fm.right_table == tm.right_table %}
-                    <option value="{{ fm.left_field }}">{{ fm.left_field }}</option>
-                  {% endif %}
-                {% endfor %}
-              </select>
-            </div>
-            <div class="col">
-              <strong>{{ tm.right_table }} fields</strong><br/>
-              <select name="fields_right::{{ tm.right_table }}" multiple size="8" style="width:100%;">
-                {% for fm in field_maps %}
-                  {% if fm.left_table == tm.left_table and fm.right_table == tm.right_table %}
-                    <option value="{{ fm.right_field }}">{{ fm.right_field }}</option>
-                  {% endif %}
-                {% endfor %}
-              </select>
-            </div>
-          </div>
-        </div>
-      {% endfor %}
-
-      <button type="submit">Trace employee across selected tables</button>
+      <button type="submit">Trace employee across selected RIGHT tables</button>
     </form>
 
     {% for f in trace_frames %}

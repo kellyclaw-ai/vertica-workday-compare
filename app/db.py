@@ -34,3 +34,18 @@ def get_table_columns(conn_info: dict[str, Any], table_name: str) -> list[str]:
         return []
     i = cols.index("column_name")
     return [r[i] for r in rows]
+
+
+def get_schema_tables(conn_info: dict[str, Any], schema: str) -> list[str]:
+    sql = """
+        SELECT table_schema, table_name
+        FROM v_catalog.tables
+        WHERE table_schema = %s
+        ORDER BY table_name
+    """
+    cols, rows, _ = run_query(conn_info, sql, (schema,))
+    if not rows:
+        return []
+    ischema = cols.index("table_schema")
+    itable = cols.index("table_name")
+    return [f"{r[ischema]}.{r[itable]}" for r in rows]
