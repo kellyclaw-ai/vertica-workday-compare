@@ -414,9 +414,23 @@ def employee_trace(
     employee_id: str,
     fields: list[str],
     employee_field_name: str,
+    order_by: str | None = None,
 ) -> dict[str, Any]:
     cols = ", ".join(_quote_ident(c) for c in fields) if fields else "*"
-    sql = f"SELECT {cols} FROM {_quote_table(table)} WHERE {_quote_ident(employee_field_name)} = %s LIMIT 200"
+
+    order_sql = ""
+    if order_by:
+        # Vertica supports NULLS LAST; keeps undated rows at the bottom.
+        order_sql = f" ORDER BY {_quote_ident(order_by)} ASC NULLS LAST"
+
+    sql = (
+        f"SELECT {cols} "
+        f"FROM {_quote_table(table)} "
+        f"WHERE {_quote_ident(employee_field_name)} = %s"
+        f"{order_sql} "
+        f"LIMIT 200"
+    )
+
     out_cols, rows, sec = run_query(conn, sql, (employee_id,))
     return {
         "table": table,

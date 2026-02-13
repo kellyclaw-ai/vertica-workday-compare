@@ -16,6 +16,7 @@
     code { white-space: pre-wrap; }
     .table-scroll { overflow: auto; max-height: 420px; border:1px solid #eee; }
     .frame-scroll { overflow: auto; max-height: 520px; border:1px solid #eee; padding:8px; }
+    .changed { background: #FFF3B0; }
   </style>
 </head>
 <body>
@@ -147,7 +148,9 @@
             <tbody>
               {% for row in f.frame.rows %}
                 <tr>
-                  {% for c in f.frame.columns %}<td>{{ row[c] }}</td>{% endfor %}
+                  {% for c in f.frame.columns %}
+                    <td class="{% if row['__changed_cols'] and (c in row['__changed_cols']) %}changed{% endif %}">{{ row[c] }}</td>
+                  {% endfor %}
                 </tr>
               {% else %}
                 <tr><td colspan="{{ f.frame.columns|length if f.frame.columns else 1 }}"><em>No rows</em></td></tr>

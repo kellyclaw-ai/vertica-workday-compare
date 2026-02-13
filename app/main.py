@@ -208,13 +208,48 @@ async def trace_ui(request: Request):
         if cols and any(c.lower() == "employee_id" for c in cols):
             cols = [c for c in cols if c.lower() == "employee_id"] + [c for c in cols if c.lower() != "employee_id"]
 
-        frame = employee_trace(conn, table, employee_id, cols, "employee_id")
+        # Always sort results by effective date when present.
+        eff_col = None
+        for c in cols or []:
+            cl = c.lower()
+            if cl == "effective_dt" or cl == "effective_date":
+                eff_col = c
+                break
 
-        # Sort rows by employee_id if present
+        frame = employee_trace(conn, table, employee_id, cols, "employee_id", order_by=eff_col)
+
+        # Highlight cells whose values differ from the previous record (as ordered by effective date).
+        # We store a per-row list of changed columns for the template to style.
         if frame.get("rows") and frame.get("columns"):
-            if any(c.lower() == "employee_id" for c in frame["columns"]):
-                emp_col = next(c for c in frame["columns"] if c.lower() == "employee_id")
-                frame["rows"] = sorted(frame["rows"], key=lambda r: str(r.get(emp_col, "")))
+            ignore = {"employee_id", "effective_dt", "effective_date"}
+
+            def _norm(v):
+                # Treat blank/whitespace strings as NULL for change detection
+                if v is None:
+                    return None
+                if isinstance(v, str):
+                    sv = v.strip()
+                    return None if sv == "" else sv
+                return v
+
+            def _distinct(a, b) -> bool:
+                # Null-safe "distinct" check (with blank-as-null normalization)
+                na = _norm(a)
+                nb = _norm(b)
+                if na is None and nb is None:
+                    return False
+                return na != nb
+
+            prev = None
+            for r in frame["rows"]:
+                r["__changed_cols"] = []
+                if prev is not None:
+                    for c in frame["columns"]:
+                        if c.lower() in ignore:
+                            continue
+                        if _distinct(r.get(c), prev.get(c)):
+                            r["__changed_cols"].append(c)
+                prev = r
 
         if not god_mode:
             frame["sql"] = "hidden"
