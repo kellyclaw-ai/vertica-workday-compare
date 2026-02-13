@@ -60,22 +60,16 @@ def _render_home(request: Request, compare_result=None, trace_frames=None, emplo
         if table_maps[0].right_table and "." in table_maps[0].right_table:
             right_schema = table_maps[0].right_table.split(".", 1)[0]
 
-    left_schema_tables: list[str] = []
+    # LEFT tables: always use table_map (mapping file) for the checklist
+    left_schema_tables = sorted({tm.left_table for tm in table_maps if tm.left_table})
+
+    # RIGHT tables: prefer live schema enumeration; fallback to mapped right tables
     right_schema_tables: list[str] = []
-    if left_schema:
-        try:
-            left_schema_tables = get_schema_tables(_conn_left(), left_schema)
-        except Exception:
-            left_schema_tables = []
     if right_schema:
         try:
             right_schema_tables = get_schema_tables(_conn_right(), right_schema)
         except Exception:
             right_schema_tables = []
-
-    # Fallbacks: use mapped tables only
-    if not left_schema_tables:
-        left_schema_tables = sorted({tm.left_table for tm in table_maps if tm.left_table})
     if not right_schema_tables:
         right_schema_tables = sorted({tm.right_table for tm in table_maps if tm.right_table})
 
