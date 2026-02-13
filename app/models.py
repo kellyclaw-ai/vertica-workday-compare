@@ -17,6 +17,15 @@ class FieldMap(BaseModel):
     compare: bool = True
 
 
+class ValueMap(BaseModel):
+    # Per-table/field canonicalization rule.
+    # Applies independently on left and right tables.
+    table: str
+    field: str
+    table_value: Any
+    canonical_value: Any
+
+
 class CompareRequest(BaseModel):
     left_table: str
     right_table: str

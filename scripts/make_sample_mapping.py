@@ -29,5 +29,14 @@ rows = [
 for r in rows:
     ws2.append(r)
 
+# Per-field canonicalization rules (optional)
+ws3 = wb.create_sheet("value_map")
+ws3.append(["table", "field", "table_value", "canonical_value"])
+# Example: normalize YES/NO/TRUE/FALSE variants
+ws3.append(["wd_dev.worker_core", "active_flag", "TRUE", "Y"])
+ws3.append(["wd_dev.worker_core", "active_flag", "FALSE", "N"])
+ws3.append(["wd_prod.worker_core", "is_active", "YES", "Y"])
+ws3.append(["wd_prod.worker_core", "is_active", "NO", "N"])
+
 wb.save(out)
 print(f"Wrote {out}")

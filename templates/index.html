@@ -119,6 +119,13 @@
       </div>
 
       <h3>Tables + field pickers</h3>
+      {% if value_maps %}
+        <div class="frame">
+          <strong>Value map rules loaded:</strong> {{ value_maps|length }}
+          <div class="small">Sheet: <code>value_map</code> (columns: table, field, table_value, canonical_value)</div>
+        </div>
+      {% endif %}
+
       {% for tm in table_maps %}
         <div class="frame">
           <label>

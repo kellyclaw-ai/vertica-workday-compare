@@ -65,11 +65,28 @@ def _normalize_datetime_value(v: Any):
     return v
 
 
-def _normalize(v: Any, *, field_name: str | None = None, trim_strings: bool = True, nullish_equal: bool = True, number_precision: int = 6):
+def _normalize(
+    v: Any,
+    *,
+    table_name: str | None = None,
+    field_name: str | None = None,
+    value_map_ix: dict[tuple[str, str, str], Any] | None = None,
+    trim_strings: bool = True,
+    nullish_equal: bool = True,
+    number_precision: int = 6,
+):
     if v is None:
         return None
+
+    # Apply per-field canonicalization first (if configured)
+    if value_map_ix is not None and table_name and field_name:
+        k = (table_name, field_name, "" if v is None else str(v))
+        if k in value_map_ix:
+            v = value_map_ix[k]
+
     if field_name and _looks_datetime_field(field_name):
         return _normalize_datetime_value(v)
+
     if isinstance(v, str):
         vv = v.strip() if trim_strings else v
         if nullish_equal and vv == "":
@@ -119,6 +136,7 @@ def compare_tables(
     left_table: str,
     right_table: str,
     all_field_maps: list[FieldMap],
+    value_maps: list[Any],
     employee_id: str | None = None,
     sample_employee_ids: bool = False,
     sample_size: int = 100,
@@ -132,6 +150,19 @@ def compare_tables(
         f for f in all_field_maps
         if f.left_table == left_table and f.right_table == right_table
     ]
+
+    # Build (table, field, table_value) -> canonical_value lookup
+    value_map_ix: dict[tuple[str, str, str], Any] = {}
+    for vm in value_maps or []:
+        try:
+            t = str(getattr(vm, "table"))
+            f = str(getattr(vm, "field"))
+            tv = getattr(vm, "table_value")
+            cv = getattr(vm, "canonical_value")
+            key = (t, f, "" if tv is None else str(tv))
+            value_map_ix[key] = cv
+        except Exception:
+            continue
     compare_maps = field_map_for_table(all_field_maps, left_table, right_table)
     key_maps = key_map_for_table(all_field_maps, left_table, right_table)
 
@@ -201,10 +232,10 @@ def compare_tables(
     right_data = _rows_to_dicts(r_cols, r_rows)
 
     def lkey(row: dict[str, Any]):
-        return tuple(_normalize(row.get(k), field_name=k, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in left_key_fields)
+        return tuple(_normalize(row.get(k), table_name=left_table, field_name=k, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in left_key_fields)
 
     def rkey(row: dict[str, Any]):
-        return tuple(_normalize(row.get(k), field_name=k, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in right_key_fields)
+        return tuple(_normalize(row.get(k), table_name=right_table, field_name=k, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in right_key_fields)
 
     # Keep table outputs sorted by key
     left_data = sorted(left_data, key=lkey)
@@ -220,15 +251,15 @@ def compare_tables(
     only_right_rows = [right_ix[k] for k in sorted(right_keys - left_keys)]
     both_rows_left = [left_ix[k] for k in sorted(left_keys & right_keys)]
 
-    def _norm_row(row: dict[str, Any], fields: list[str]) -> dict[str, Any]:
+    def _norm_row(row: dict[str, Any], table_name: str, fields: list[str]) -> dict[str, Any]:
         return {
-            f: _normalize(row.get(f), field_name=f, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+            f: _normalize(row.get(f), table_name=table_name, field_name=f, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
             for f in fields
         }
 
-    only_left_rows_norm = [_norm_row(r, left_select_fields) for r in only_left_rows]
-    only_right_rows_norm = [_norm_row(r, right_select_fields) for r in only_right_rows]
-    both_rows_left_norm = [_norm_row(r, left_select_fields) for r in both_rows_left]
+    only_left_rows_norm = [_norm_row(r, left_table, left_select_fields) for r in only_left_rows]
+    only_right_rows_norm = [_norm_row(r, right_table, right_select_fields) for r in only_right_rows]
+    both_rows_left_norm = [_norm_row(r, left_table, left_select_fields) for r in both_rows_left]
 
     field_differences_rows: list[dict[str, Any]] = []
     summary_counts: dict[tuple[str, str], int] = {}
@@ -237,13 +268,13 @@ def compare_tables(
         lrow = left_ix[k]
         rrow = right_ix[k]
 
-        key_payload = {lf: _normalize(lrow.get(lf), field_name=lf, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for lf in left_key_fields}
+        key_payload = {lf: _normalize(lrow.get(lf), table_name=left_table, field_name=lf, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for lf in left_key_fields}
 
         for fm in compare_maps:
             lv_raw = lrow.get(fm.left_field)
             rv_raw = rrow.get(fm.right_field)
-            lv = _normalize(lv_raw, field_name=fm.left_field, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
-            rv = _normalize(rv_raw, field_name=fm.right_field, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+            lv = _normalize(lv_raw, table_name=left_table, field_name=fm.left_field, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+            rv = _normalize(rv_raw, table_name=right_table, field_name=fm.right_field, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
             if lv != rv:
                 out = {
                     **key_payload,
@@ -272,8 +303,8 @@ def compare_tables(
 
         mismatches: list[str] = []
         for lf, rf in compare_pairs:
-            lv = _normalize((lrow or {}).get(lf), field_name=lf, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
-            rv = _normalize((rrow or {}).get(rf), field_name=rf, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+            lv = _normalize((lrow or {}).get(lf), table_name=left_table, field_name=lf, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+            rv = _normalize((rrow or {}).get(rf), table_name=right_table, field_name=rf, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
             out[f"left_{lf}"] = lv
             out[f"right_{lf}"] = rv
             if origin == "both" and lv != rv:

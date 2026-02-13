@@ -26,7 +26,7 @@ def _unmapped_fields_report(left_table: str, right_table: str) -> dict:
     left_cols = get_table_columns(_conn_left(), left_table)
     right_cols = get_table_columns(_conn_right(), right_table)
 
-    _, all_field_maps = load_mapping(settings.mapping_file)
+    _, all_field_maps, _value_maps = load_mapping(settings.mapping_file)
     pair_field_maps = [
         f for f in all_field_maps
         if f.left_table == left_table and f.right_table == right_table
@@ -49,13 +49,14 @@ def _unmapped_fields_report(left_table: str, right_table: str) -> dict:
 
 
 def _render_home(request: Request, compare_result=None, trace_frames=None, employee_id=""):
-    table_maps, field_maps = load_mapping(settings.mapping_file)
+    table_maps, field_maps, value_maps = load_mapping(settings.mapping_file)
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
             "table_maps": table_maps,
             "field_maps": field_maps,
+            "value_maps": value_maps,
             "god_mode_default": settings.god_mode_default,
             "compare_result": compare_result,
             "trace_frames": trace_frames or [],
@@ -74,7 +75,7 @@ def introspect(left_table: str, right_table: str):
     left_cols = get_table_columns(_conn_left(), left_table)
     right_cols = get_table_columns(_conn_right(), right_table)
 
-    _, all_field_maps = load_mapping(settings.mapping_file)
+    _, all_field_maps, _value_maps = load_mapping(settings.mapping_file)
     pair_field_maps = [
         f for f in all_field_maps
         if f.left_table == left_table and f.right_table == right_table
@@ -125,13 +126,14 @@ def compare_ui(
     nullish_equal: bool = Form(True),
     number_precision: int = Form(6),
 ):
-    _, field_maps = load_mapping(settings.mapping_file)
+    _, field_maps, value_maps = load_mapping(settings.mapping_file)
     result = compare_tables(
         _conn_left(),
         _conn_right(),
         left_table,
         right_table,
         field_maps,
+        value_maps,
         employee_id.strip() or None,
         sample_employee_ids,
         100,

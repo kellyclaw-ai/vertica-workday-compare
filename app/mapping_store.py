@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from openpyxl import load_workbook
-from app.models import TableMap, FieldMap
+from app.models import TableMap, FieldMap, ValueMap
 
 
 def _sheet_dicts(ws):
@@ -15,14 +15,19 @@ def _sheet_dicts(ws):
     return out
 
 
-def load_mapping(path: str) -> tuple[list[TableMap], list[FieldMap]]:
+def load_mapping(path: str) -> tuple[list[TableMap], list[FieldMap], list[ValueMap]]:
     wb = load_workbook(path)
     table_rows = _sheet_dicts(wb["table_map"])
     field_rows = _sheet_dicts(wb["field_map"])
 
+    value_rows = []
+    if "value_map" in wb.sheetnames:
+        value_rows = _sheet_dicts(wb["value_map"])
+
     table_maps = [TableMap(**r) for r in table_rows]
     field_maps = [FieldMap(**r) for r in field_rows]
-    return table_maps, field_maps
+    value_maps = [ValueMap(**r) for r in value_rows]
+    return table_maps, field_maps, value_maps
 
 
 def field_map_for_table(field_maps: list[FieldMap], left_table: str, right_table: str) -> list[FieldMap]:
