@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill
@@ -107,10 +108,20 @@ def _sortable_dt(v: Any):
     return datetime.min
 
 
+def _excel_safe(v: Any):
+    # openpyxl cannot write some native Python objects (e.g., uuid.UUID)
+    if isinstance(v, UUID):
+        return str(v)
+    if isinstance(v, (datetime, date, int, float, bool, str)) or v is None:
+        return v
+    # Fallback for Decimal, bytes, custom objects, etc.
+    return str(v)
+
+
 def _write_table(ws, columns: list[str], rows: list[dict[str, Any]], *, changed_cols_by_row: list[set[str]] | None = None):
     ws.append(columns)
     for i, r in enumerate(rows):
-        ws.append([r.get(c) for c in columns])
+        ws.append([_excel_safe(r.get(c)) for c in columns])
         if changed_cols_by_row is None:
             continue
         changed = changed_cols_by_row[i] if i < len(changed_cols_by_row) else set()
@@ -177,8 +188,12 @@ def _infer_schema_from_mapping(which: str) -> str | None:
 
 def _list_tables(conn: dict, schema: str) -> list[str]:
     tables = get_schema_tables(conn, schema)
-    # get_schema_tables returns unqualified names; qualify for querying.
-    return [f"{schema}.{t}" for t in tables]
+    # app.db.get_schema_tables already returns fully-qualified schema.table names.
+    # Keep a defensive normalization in case implementation changes.
+    out: list[str] = []
+    for t in tables:
+        out.append(t if "." in t else f"{schema}.{t}")
+    return out
 
 
 def _trace_explorer_table_refs() -> list[TableRef]:
