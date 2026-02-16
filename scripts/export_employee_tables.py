@@ -1,7 +1,11 @@
 """Export raw per-table employee_id extracts to an Excel workbook.
 
 - Interactive CLI table selection.
-- Runs SELECT * for each selected table filtered by employee_id.
+- Runs SELECT * for each selected table.
+- Interactive data scope options:
+  - single employee_id
+  - random/semi-random 100-row sample
+  - full table
 - Sorts by effective date when present (effective_dt or effective_date).
 - Highlights cells whose values changed vs the previous record (by effective date).
 
@@ -195,17 +199,44 @@ def _trace_explorer_table_refs() -> list[TableRef]:
     return ([TableRef("left", t) for t in left_tables] + [TableRef("right", t) for t in right_tables])
 
 
-def export_table_ref(wb: Workbook, ref: TableRef, employee_id: str):
+def export_table_ref(
+    wb: Workbook,
+    ref: TableRef,
+    *,
+    scope: str,
+    employee_id: str | None = None,
+    sample_size: int = 100,
+):
     conn = settings.left.model_dump() if ref.side == "left" else settings.right.model_dump()
     table = ref.table
 
     cols = get_table_columns(conn, table)
     eff_col = _find_effective_col(cols)
+    eff_order_sql = f" ORDER BY {_quote_ident(eff_col)} ASC NULLS LAST" if eff_col else ""
 
-    order_sql = f" ORDER BY {_quote_ident(eff_col)} ASC NULLS LAST" if eff_col else ""
-    sql = f"SELECT * FROM {_quote_table(table)} WHERE employee_id = %s{order_sql} LIMIT 200"
+    if scope == "employee":
+        if not employee_id:
+            raise ValueError("employee_id is required for employee scope")
+        sql = f"SELECT * FROM {_quote_table(table)} WHERE employee_id = %s{eff_order_sql}"
+        params: tuple[Any, ...] | None = (employee_id,)
+    elif scope == "sample100":
+        # Semi-random sample using ORDER BY RANDOM(). If effective date exists, re-sort sampled set by effective date.
+        if eff_col:
+            sql = (
+                f"SELECT * FROM ("
+                f"SELECT * FROM {_quote_table(table)} ORDER BY RANDOM() LIMIT {int(sample_size)}"
+                f") s ORDER BY {_quote_ident(eff_col)} ASC NULLS LAST"
+            )
+        else:
+            sql = f"SELECT * FROM {_quote_table(table)} ORDER BY RANDOM() LIMIT {int(sample_size)}"
+        params = None
+    elif scope == "full":
+        sql = f"SELECT * FROM {_quote_table(table)}{eff_order_sql}"
+        params = None
+    else:
+        raise ValueError(f"Unsupported scope: {scope}")
 
-    out_cols, out_rows, _sec = run_query(conn, sql, (employee_id,))
+    out_cols, out_rows, _sec = run_query(conn, sql, params)
     rows = [dict(zip(out_cols, r)) for r in out_rows]
 
     # Defensive sort in Python too
@@ -237,11 +268,25 @@ def main():
     ap.add_argument("--out", default=None, help="Output xlsx path")
     args = ap.parse_args()
 
-    employee_id = ""
-    while not employee_id:
-        employee_id = input("Enter employee_id: ").strip()
-        if not employee_id:
-            print("employee_id is required.")
+    print("\nData scope:")
+    print("  1) Single employee_id")
+    print("  2) Random/semi-random 100 rows")
+    print("  3) Full table")
+
+    scope_choice = ""
+    while scope_choice not in {"1", "2", "3"}:
+        scope_choice = input("Choose scope [1/2/3]: ").strip()
+
+    scope = {"1": "employee", "2": "sample100", "3": "full"}[scope_choice]
+
+    employee_id: str | None = None
+    if scope == "employee":
+        eid = ""
+        while not eid:
+            eid = input("Enter employee_id: ").strip()
+            if not eid:
+                print("employee_id is required.")
+        employee_id = eid
 
     refs = _trace_explorer_table_refs()
     if not refs:
@@ -274,11 +319,13 @@ def main():
     wb.remove(wb.active)  # remove default sheet
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = Path(args.out) if args.out else Path(f"output/employee_extract_{employee_id}_{ts}.xlsx")
+    scope_label = "employee" if scope == "employee" else ("sample100" if scope == "sample100" else "full")
+    suffix = f"_{employee_id}" if employee_id else ""
+    out_path = Path(args.out) if args.out else Path(f"output/table_extract_{scope_label}{suffix}_{ts}.xlsx")
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     for ref in selected:
-        export_table_ref(wb, ref, employee_id)
+        export_table_ref(wb, ref, scope=scope, employee_id=employee_id, sample_size=100)
 
     wb.save(out_path)
     print(f"\nWrote workbook: {out_path}")
