@@ -420,8 +420,7 @@ def employee_trace(
 
     order_sql = ""
     if order_by:
-        # Vertica supports NULLS LAST; keeps undated rows at the bottom.
-        order_sql = f" ORDER BY {_quote_ident(order_by)} ASC NULLS LAST"
+        order_sql = f" ORDER BY {_quote_ident(order_by)} ASC"
 
     sql = (
         f"SELECT {cols} "

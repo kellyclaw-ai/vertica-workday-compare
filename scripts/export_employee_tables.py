@@ -227,7 +227,7 @@ def export_table_ref(
 
     cols = get_table_columns(conn, table)
     eff_col = _find_effective_col(cols)
-    eff_order_sql = f" ORDER BY {_quote_ident(eff_col)} ASC NULLS LAST" if eff_col else ""
+    eff_order_sql = f" ORDER BY {_quote_ident(eff_col)} ASC" if eff_col else ""
 
     if scope == "employee":
         if not employee_id:
@@ -240,7 +240,7 @@ def export_table_ref(
             sql = (
                 f"SELECT * FROM ("
                 f"SELECT * FROM {_quote_table(table)} ORDER BY RANDOM() LIMIT {int(sample_size)}"
-                f") s ORDER BY {_quote_ident(eff_col)} ASC NULLS LAST"
+                f") s ORDER BY {_quote_ident(eff_col)} ASC"
             )
         else:
             sql = f"SELECT * FROM {_quote_table(table)} ORDER BY RANDOM() LIMIT {int(sample_size)}"
