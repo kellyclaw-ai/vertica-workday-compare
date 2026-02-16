@@ -44,6 +44,21 @@ def _sheet_name(name: str) -> str:
     return safe[:31] if len(safe) > 31 else safe
 
 
+def _unique_sheet_name(wb: Workbook, base_name: str) -> str:
+    """Return an Excel-safe unique sheet name (<=31 chars)."""
+    base = _sheet_name(base_name)
+    if base not in wb.sheetnames:
+        return base
+
+    i = 2
+    while True:
+        suffix = f"_{i}"
+        candidate = base[: 31 - len(suffix)] + suffix
+        if candidate not in wb.sheetnames:
+            return candidate
+        i += 1
+
+
 def _quote_ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
@@ -273,8 +288,10 @@ def export_table_ref(
         changed_cols_by_row.append(changed)
         prev = r
 
-    # Sheet name includes side to avoid collisions when left/right share table base names
-    ws = wb.create_sheet(_sheet_name(f"{ref.side}_{table}"))
+    # Sheet name: table name only (no side/schema), truncated to Excel limits.
+    # If duplicate table names exist across sides/schemas, auto-deduplicate with numeric suffix.
+    table_only = table.split(".")[-1]
+    ws = wb.create_sheet(_unique_sheet_name(wb, table_only))
     _write_table(ws, out_cols, rows, changed_cols_by_row=changed_cols_by_row)
 
 
