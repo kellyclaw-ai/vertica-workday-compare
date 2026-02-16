@@ -6,8 +6,8 @@
 - Highlights cells whose values changed vs the previous record (by effective date).
 
 Usage:
-  python3 scripts/export_employee_tables.py --employee-id 12345
-  python3 scripts/export_employee_tables.py --employee-id 12345 --out out.xlsx
+  python3 scripts/export_employee_tables.py
+  python3 scripts/export_employee_tables.py --out out.xlsx
 
 Notes:
 - This script uses the same Vertica connection settings as the FastAPI app (app/settings.py).
@@ -234,13 +234,14 @@ def export_table_ref(wb: Workbook, ref: TableRef, employee_id: str):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--employee-id", required=True)
     ap.add_argument("--out", default=None, help="Output xlsx path")
     args = ap.parse_args()
 
-    employee_id = str(args.employee_id).strip()
-    if not employee_id:
-        raise SystemExit("employee-id is required")
+    employee_id = ""
+    while not employee_id:
+        employee_id = input("Enter employee_id: ").strip()
+        if not employee_id:
+            print("employee_id is required.")
 
     refs = _trace_explorer_table_refs()
     if not refs:
