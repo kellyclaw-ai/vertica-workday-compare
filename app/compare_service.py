@@ -84,6 +84,11 @@ def _normalize(
         if k in value_map_ix:
             v = value_map_ix[k]
 
+    # Normalize actual date/datetime types regardless of column naming.
+    if isinstance(v, (datetime, date)):
+        return _normalize_datetime_value(v)
+
+    # Also normalize date-like strings when field name hints datetime semantics.
     if field_name and _looks_datetime_field(field_name):
         return _normalize_datetime_value(v)
 
@@ -95,6 +100,22 @@ def _normalize(
     if isinstance(v, float):
         return round(v, number_precision)
     return v
+
+
+def _sort_token(v: Any) -> tuple[int, str]:
+    # Stable, cross-type comparable token for sorting only.
+    # Keeps equality logic separate (we still use raw normalized values for joins).
+    if v is None:
+        return (0, "")
+    if isinstance(v, (datetime, date)):
+        return (1, _normalize_datetime_value(v) or "")
+    if isinstance(v, (int, float)):
+        return (2, f"{v:.15g}")
+    return (3, str(v))
+
+
+def _sort_key_tuple(key_tuple: tuple[Any, ...]) -> tuple[tuple[int, str], ...]:
+    return tuple(_sort_token(v) for v in key_tuple)
 
 
 def _rows_to_dicts(cols: list[str], rows: list[tuple]) -> list[dict[str, Any]]:
@@ -237,28 +258,9 @@ def compare_tables(
     def rkey(row: dict[str, Any]):
         return tuple(_normalize(row.get(k), table_name=right_table, field_name=k, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in right_key_fields)
 
-    # Keep table outputs sorted by key
-    try:
-        left_data = sorted(left_data, key=lkey)
-    except TypeError as e:
-        print(f"[compare_debug] TypeError sorting left table '{left_table}': {e}")
-        print(f"[compare_debug] left key fields: {left_key_fields}")
-        for i, row in enumerate(left_data):
-            key_vals = {k: row.get(k) for k in left_key_fields}
-            norm_vals = {k: _normalize(row.get(k), table_name=left_table, field_name=k, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in left_key_fields}
-            print(f"[compare_debug] left row {i} key raw={key_vals} norm={norm_vals}")
-        raise
-
-    try:
-        right_data = sorted(right_data, key=rkey)
-    except TypeError as e:
-        print(f"[compare_debug] TypeError sorting right table '{right_table}': {e}")
-        print(f"[compare_debug] right key fields: {right_key_fields}")
-        for i, row in enumerate(right_data):
-            key_vals = {k: row.get(k) for k in right_key_fields}
-            norm_vals = {k: _normalize(row.get(k), table_name=right_table, field_name=k, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in right_key_fields}
-            print(f"[compare_debug] right row {i} key raw={key_vals} norm={norm_vals}")
-        raise
+    # Keep table outputs sorted by key (sort-safe across None/str/date/etc.)
+    left_data = sorted(left_data, key=lambda row: _sort_key_tuple(lkey(row)))
+    right_data = sorted(right_data, key=lambda row: _sort_key_tuple(rkey(row)))
 
     left_ix = {lkey(row): row for row in left_data}
     right_ix = {rkey(row): row for row in right_data}
@@ -266,9 +268,9 @@ def compare_tables(
     left_keys = set(left_ix)
     right_keys = set(right_ix)
 
-    only_left_rows = [left_ix[k] for k in sorted(left_keys - right_keys)]
-    only_right_rows = [right_ix[k] for k in sorted(right_keys - left_keys)]
-    both_rows_left = [left_ix[k] for k in sorted(left_keys & right_keys)]
+    only_left_rows = [left_ix[k] for k in sorted(left_keys - right_keys, key=_sort_key_tuple)]
+    only_right_rows = [right_ix[k] for k in sorted(right_keys - left_keys, key=_sort_key_tuple)]
+    both_rows_left = [left_ix[k] for k in sorted(left_keys & right_keys, key=_sort_key_tuple)]
 
     def _norm_row(row: dict[str, Any], table_name: str, fields: list[str]) -> dict[str, Any]:
         return {
@@ -283,7 +285,7 @@ def compare_tables(
     field_differences_rows: list[dict[str, Any]] = []
     summary_counts: dict[tuple[str, str], int] = {}
 
-    for k in sorted(left_keys & right_keys):
+    for k in sorted(left_keys & right_keys, key=_sort_key_tuple):
         lrow = left_ix[k]
         rrow = right_ix[k]
 
@@ -333,15 +335,15 @@ def compare_tables(
         return out
 
     combined_rows = []
-    for k in sorted(left_keys - right_keys):
+    for k in sorted(left_keys - right_keys, key=_sort_key_tuple):
         combined_rows.append(_combined_row("left_only", k, left_ix[k], None))
-    for k in sorted(right_keys - left_keys):
+    for k in sorted(right_keys - left_keys, key=_sort_key_tuple):
         combined_rows.append(_combined_row("right_only", k, None, right_ix[k]))
-    for k in sorted(left_keys & right_keys):
+    for k in sorted(left_keys & right_keys, key=_sort_key_tuple):
         combined_rows.append(_combined_row("both", k, left_ix[k], right_ix[k]))
 
     # sort combined by PKs (already normalized in tuple key)
-    combined_rows = sorted(combined_rows, key=lambda r: tuple(str(r.get(k, "")) for k in left_key_fields))
+    combined_rows = sorted(combined_rows, key=lambda r: tuple(_sort_token(r.get(k)) for k in left_key_fields))
 
     # Output workbook
     out_dir = Path(output_dir)
