@@ -238,8 +238,27 @@ def compare_tables(
         return tuple(_normalize(row.get(k), table_name=right_table, field_name=k, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in right_key_fields)
 
     # Keep table outputs sorted by key
-    left_data = sorted(left_data, key=lkey)
-    right_data = sorted(right_data, key=rkey)
+    try:
+        left_data = sorted(left_data, key=lkey)
+    except TypeError as e:
+        print(f"[compare_debug] TypeError sorting left table '{left_table}': {e}")
+        print(f"[compare_debug] left key fields: {left_key_fields}")
+        for i, row in enumerate(left_data):
+            key_vals = {k: row.get(k) for k in left_key_fields}
+            norm_vals = {k: _normalize(row.get(k), table_name=left_table, field_name=k, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in left_key_fields}
+            print(f"[compare_debug] left row {i} key raw={key_vals} norm={norm_vals}")
+        raise
+
+    try:
+        right_data = sorted(right_data, key=rkey)
+    except TypeError as e:
+        print(f"[compare_debug] TypeError sorting right table '{right_table}': {e}")
+        print(f"[compare_debug] right key fields: {right_key_fields}")
+        for i, row in enumerate(right_data):
+            key_vals = {k: row.get(k) for k in right_key_fields}
+            norm_vals = {k: _normalize(row.get(k), table_name=right_table, field_name=k, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in right_key_fields}
+            print(f"[compare_debug] right row {i} key raw={key_vals} norm={norm_vals}")
+        raise
 
     left_ix = {lkey(row): row for row in left_data}
     right_ix = {rkey(row): row for row in right_data}
