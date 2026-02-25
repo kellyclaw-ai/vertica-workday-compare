@@ -31,13 +31,23 @@ PARAMS = None
 # --------------------
 
 
+def _project_root_from_script() -> Path:
+    """Find repo root by walking up to the folder containing pyproject.toml."""
+    here = Path(__file__).resolve()
+    for p in [here.parent, *here.parents]:
+        if (p / "pyproject.toml").exists():
+            return p
+    # Fallback: expected layout scripts/<this_file>
+    return here.parent.parent
+
+
 def main() -> None:
     conn = settings.left.model_dump() if TARGET == "left" else settings.right.model_dump()
 
     cols, rows, sec = run_query(conn, SQL, PARAMS)
 
-    # Always write to repo-level ./output (sibling of ./scripts), regardless of cwd.
-    out_dir = Path(__file__).resolve().parent.parent / "output"
+    repo_root = _project_root_from_script()
+    out_dir = repo_root / "output"
     out_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_path = out_dir / f"vertica_query_{TARGET}_{ts}.xlsx"
@@ -52,6 +62,7 @@ def main() -> None:
 
     print(f"Rows: {len(rows)}")
     print(f"Seconds: {sec:.3f}")
+    print(f"Output dir: {out_dir}")
     print(f"Output: {out_path}")
 
 
