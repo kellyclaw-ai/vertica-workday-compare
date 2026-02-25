@@ -8,8 +8,9 @@ Usage:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
+from uuid import UUID
 
 from openpyxl import Workbook
 
@@ -29,6 +30,14 @@ SELECT 1 AS example_col
 # Example: PARAMS = ("12345",)
 PARAMS = None
 # --------------------
+
+
+def _excel_safe(v):
+    if isinstance(v, UUID):
+        return str(v)
+    if isinstance(v, (datetime, date, int, float, bool, str)) or v is None:
+        return v
+    return str(v)
 
 
 def _project_root_from_script() -> Path:
@@ -57,7 +66,7 @@ def main() -> None:
     ws.title = "query_results"
     ws.append(cols)
     for row in rows:
-        ws.append(list(row))
+        ws.append([_excel_safe(v) for v in row])
     wb.save(out_path)
 
     print(f"Rows: {len(rows)}")
