@@ -36,7 +36,8 @@ def main() -> None:
 
     cols, rows, sec = run_query(conn, SQL, PARAMS)
 
-    out_dir = Path("output")
+    # Always write to repo-level ./output (sibling of ./scripts), regardless of cwd.
+    out_dir = Path(__file__).resolve().parent.parent / "output"
     out_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_path = out_dir / f"vertica_query_{TARGET}_{ts}.xlsx"
