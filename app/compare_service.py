@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+import math
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +85,14 @@ def _normalize(
         if k in value_map_ix:
             v = value_map_ix[k]
 
+    # Re-check after value map canonicalization
+    if v is None:
+        return None
+
+    # Treat NaN as null-equivalent when nullish_equal is enabled.
+    if isinstance(v, float) and nullish_equal and math.isnan(v):
+        return None
+
     # Normalize actual date/datetime types regardless of column naming.
     if isinstance(v, (datetime, date)):
         return _normalize_datetime_value(v)
@@ -94,8 +103,11 @@ def _normalize(
 
     if isinstance(v, str):
         vv = v.strip() if trim_strings else v
-        if nullish_equal and vv == "":
-            return None
+        if nullish_equal:
+            if vv == "":
+                return None
+            if vv.lower() in {"nan", "null", "none"}:
+                return None
         return vv
     if isinstance(v, float):
         return round(v, number_precision)
