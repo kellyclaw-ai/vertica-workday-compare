@@ -250,6 +250,25 @@ def _list_tables(conn: dict, schema: str) -> list[str]:
     return out
 
 
+def _debug_print_columns_lookup(table_name: str):
+    """Print the exact v_catalog.columns lookup SQL + params for troubleshooting."""
+    if "." in table_name:
+        schema, table = table_name.split(".", 1)
+    else:
+        schema, table = "public", table_name
+
+    sql = """
+        SELECT column_name
+        FROM v_catalog.columns
+        WHERE table_schema = %s AND table_name = %s
+        ORDER BY ordinal_position
+    """.strip()
+
+    print("    v_catalog.columns SQL:")
+    print(f"    {sql}")
+    print(f"    params: table_schema={schema!r}, table_name={table!r}")
+
+
 def _trace_explorer_table_refs() -> list[TableRef]:
     table_maps, _field_maps, _value_maps = load_mapping(settings.mapping_file)
 
@@ -294,6 +313,7 @@ def _prompt_table_filter(ref: TableRef, conn: dict) -> TableFilter | None:
     cols = get_table_columns(conn, ref.table)
     if not cols:
         print(f"\n[{ref.side}] {ref.table}: no columns found; skipping filter.")
+        _debug_print_columns_lookup(ref.table)
         return None
 
     key_candidates = _mapping_key_candidates_for_ref(ref)
