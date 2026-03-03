@@ -309,35 +309,41 @@ def _mapping_key_candidates_for_ref(ref: TableRef) -> list[str]:
     return out
 
 
-def _load_columns_with_fallback(conn: dict, table_name: str) -> list[str]:
+def _load_columns_with_fallback(conn: dict, table_name: str) -> tuple[list[str], str | None]:
     """Load columns using catalog lookup first, then SQL metadata fallback.
 
-    Some objects (especially certain views/materialized constructs) may not appear in
-    v_catalog.columns for a given user/context even though SELECT works.
+    Returns: (columns, fallback_error_message)
     """
     cols = get_table_columns(conn, table_name)
     if cols:
-        return cols
+        return cols, None
 
     # Fallback: ask Vertica directly via result-set metadata.
     # LIMIT 0 keeps this cheap while still populating cursor.description.
     sql = f"SELECT * FROM {_quote_table(table_name)} LIMIT 0"
     try:
         out_cols, _rows, _sec = run_query(conn, sql)
-        return out_cols or []
-    except Exception:
-        return []
+        return (out_cols or []), None
+    except Exception as e:
+        return [], str(e)
 
 
 def _prompt_table_filter(ref: TableRef, conn: dict) -> TableFilter | None:
-    cols = _load_columns_with_fallback(conn, ref.table)
+    key_candidates = _mapping_key_candidates_for_ref(ref)
+    cols, fallback_err = _load_columns_with_fallback(conn, ref.table)
+
+    if not cols and key_candidates:
+        print(f"\n[{ref.side}] {ref.table}: metadata lookup returned no columns; using mapped key fields from field_map.")
+        cols = key_candidates
+
     if not cols:
         print(f"\n[{ref.side}] {ref.table}: no columns found; skipping filter.")
         _debug_print_columns_lookup(ref.table)
         print(f"    fallback SQL: SELECT * FROM {_quote_table(ref.table)} LIMIT 0")
+        if fallback_err:
+            print(f"    fallback error: {fallback_err}")
         return None
 
-    key_candidates = _mapping_key_candidates_for_ref(ref)
     ranked = _rank_filter_columns(cols, key_candidates)
 
     print(f"\nFilter for [{ref.side}] {ref.table}")
@@ -385,7 +391,7 @@ def export_table_ref(
     conn = settings.left.model_dump() if ref.side == "left" else settings.right.model_dump()
     table = ref.table
 
-    cols = _load_columns_with_fallback(conn, table)
+    cols, _fallback_err = _load_columns_with_fallback(conn, table)
     eff_col = _find_effective_col(cols)
     eff_order_sql = f" ORDER BY {_quote_ident(eff_col)} ASC" if eff_col else ""
 
