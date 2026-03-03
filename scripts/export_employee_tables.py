@@ -309,11 +309,32 @@ def _mapping_key_candidates_for_ref(ref: TableRef) -> list[str]:
     return out
 
 
+def _load_columns_with_fallback(conn: dict, table_name: str) -> list[str]:
+    """Load columns using catalog lookup first, then SQL metadata fallback.
+
+    Some objects (especially certain views/materialized constructs) may not appear in
+    v_catalog.columns for a given user/context even though SELECT works.
+    """
+    cols = get_table_columns(conn, table_name)
+    if cols:
+        return cols
+
+    # Fallback: ask Vertica directly via result-set metadata.
+    # LIMIT 0 keeps this cheap while still populating cursor.description.
+    sql = f"SELECT * FROM {_quote_table(table_name)} LIMIT 0"
+    try:
+        out_cols, _rows, _sec = run_query(conn, sql)
+        return out_cols or []
+    except Exception:
+        return []
+
+
 def _prompt_table_filter(ref: TableRef, conn: dict) -> TableFilter | None:
-    cols = get_table_columns(conn, ref.table)
+    cols = _load_columns_with_fallback(conn, ref.table)
     if not cols:
         print(f"\n[{ref.side}] {ref.table}: no columns found; skipping filter.")
         _debug_print_columns_lookup(ref.table)
+        print(f"    fallback SQL: SELECT * FROM {_quote_table(ref.table)} LIMIT 0")
         return None
 
     key_candidates = _mapping_key_candidates_for_ref(ref)
@@ -364,7 +385,7 @@ def export_table_ref(
     conn = settings.left.model_dump() if ref.side == "left" else settings.right.model_dump()
     table = ref.table
 
-    cols = get_table_columns(conn, table)
+    cols = _load_columns_with_fallback(conn, table)
     eff_col = _find_effective_col(cols)
     eff_order_sql = f" ORDER BY {_quote_ident(eff_col)} ASC" if eff_col else ""
 
