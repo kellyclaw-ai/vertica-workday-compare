@@ -76,10 +76,7 @@ def _normalize(
     nullish_equal: bool = True,
     number_precision: int = 6,
 ):
-    if v is None:
-        return None
-
-    # Apply per-field canonicalization first (if configured)
+    # Apply per-field canonicalization first (if configured), including NULL table_value rules.
     if value_map_ix is not None and table_name and field_name:
         k = (table_name, field_name, "" if v is None else str(v))
         if k in value_map_ix:
