@@ -15,6 +15,9 @@ class FieldMap(BaseModel):
     right_field: str
     is_key: bool = False
     compare: bool = True
+    # Optional canonical type used to coerce key values on both sides before join.
+    # Examples: integer, float, string, date, datetime, boolean
+    key_type: str | None = None
 
 
 class ValueMap(BaseModel):

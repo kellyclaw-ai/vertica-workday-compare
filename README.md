@@ -33,7 +33,21 @@ Generated at:
 
 Sheets:
 - `table_map` (left_table -> right_table)
-- `field_map` (left_table.left_field -> right_table.right_field, key flag, compare flag)
+- `field_map` (left_table.left_field -> right_table.right_field, key flag, compare flag, optional `key_type`)
+
+### Key type coercion (for mismatched PK types)
+
+If a mapped key column has different physical types across environments (e.g., `VARCHAR` on left, `INT` on right), set `key_type` on that `field_map` row. The compare engine will coerce both sides to the same canonical type before key matching.
+
+Supported `key_type` values:
+- `integer`
+- `float`
+- `string`
+- `date`
+- `datetime` / `timestamp`
+- `boolean`
+
+Example: for `month` (`'01'` on one side vs `1` on the other), mark the key row with `key_type=integer`.
 
 ## Vertica config placeholders
 

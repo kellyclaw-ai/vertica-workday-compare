@@ -114,6 +114,68 @@ def _normalize(
     return v
 
 
+def _coerce_to_key_type(v: Any, key_type: str | None):
+    if key_type is None:
+        return v
+
+    kt = str(key_type).strip().lower()
+    if not kt:
+        return v
+
+    if v is None:
+        return None
+
+    # normalize aliases
+    if kt in {"int", "integer", "bigint", "smallint", "tinyint"}:
+        try:
+            if isinstance(v, str):
+                vv = v.strip()
+                if vv == "":
+                    return None
+                return int(float(vv))
+            return int(v)
+        except Exception:
+            return v
+
+    if kt in {"float", "double", "decimal", "numeric", "number", "real"}:
+        try:
+            if isinstance(v, str):
+                vv = v.strip()
+                if vv == "":
+                    return None
+                return float(vv)
+            return float(v)
+        except Exception:
+            return v
+
+    if kt in {"str", "string", "varchar", "char", "text"}:
+        return str(v).strip() if isinstance(v, str) else str(v)
+
+    if kt in {"bool", "boolean"}:
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        if isinstance(v, str):
+            vv = v.strip().lower()
+            if vv in {"1", "true", "t", "yes", "y"}:
+                return True
+            if vv in {"0", "false", "f", "no", "n", ""}:
+                return False
+        return v
+
+    if kt in {"date"}:
+        nv = _normalize_datetime_value(v)
+        if isinstance(nv, str) and len(nv) >= 10:
+            return nv[:10]
+        return nv
+
+    if kt in {"datetime", "timestamp"}:
+        return _normalize_datetime_value(v)
+
+    return v
+
+
 def _sort_token(v: Any) -> tuple[int, str]:
     # Stable, cross-type comparable token for sorting only.
     # Keeps equality logic separate (we still use raw normalized values for joins).
@@ -214,6 +276,8 @@ def compare_tables(
 
     left_key_fields = [k.left_field for k in key_maps]
     right_key_fields = [k.right_field for k in key_maps]
+    left_key_types = {k.left_field: (k.key_type.strip().lower() if isinstance(k.key_type, str) and k.key_type.strip() else None) for k in key_maps}
+    right_key_types = {k.right_field: (k.key_type.strip().lower() if isinstance(k.key_type, str) and k.key_type.strip() else None) for k in key_maps}
 
     left_compare_fields = [f.left_field for f in compare_maps]
     right_compare_fields = [f.right_field for f in compare_maps]
@@ -265,10 +329,38 @@ def compare_tables(
     right_data = _rows_to_dicts(r_cols, r_rows)
 
     def lkey(row: dict[str, Any]):
-        return tuple(_normalize(row.get(k), table_name=left_table, field_name=k, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in left_key_fields)
+        return tuple(
+            _coerce_to_key_type(
+                _normalize(
+                    row.get(k),
+                    table_name=left_table,
+                    field_name=k,
+                    value_map_ix=value_map_ix,
+                    trim_strings=trim_strings,
+                    nullish_equal=nullish_equal,
+                    number_precision=number_precision,
+                ),
+                left_key_types.get(k),
+            )
+            for k in left_key_fields
+        )
 
     def rkey(row: dict[str, Any]):
-        return tuple(_normalize(row.get(k), table_name=right_table, field_name=k, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision) for k in right_key_fields)
+        return tuple(
+            _coerce_to_key_type(
+                _normalize(
+                    row.get(k),
+                    table_name=right_table,
+                    field_name=k,
+                    value_map_ix=value_map_ix,
+                    trim_strings=trim_strings,
+                    nullish_equal=nullish_equal,
+                    number_precision=number_precision,
+                ),
+                right_key_types.get(k),
+            )
+            for k in right_key_fields
+        )
 
     # Keep table outputs sorted by key (sort-safe across None/str/date/etc.)
     left_data = sorted(left_data, key=lambda row: _sort_key_tuple(lkey(row)))

@@ -13,18 +13,18 @@ ws1.append(["wd_dev.worker_comp", "wd_prod.worker_comp", True])
 ws1.append(["wd_dev.worker_org", "wd_prod.worker_org", True])
 
 ws2 = wb.create_sheet("field_map")
-ws2.append(["left_table", "left_field", "right_table", "right_field", "is_key", "compare"])
+ws2.append(["left_table", "left_field", "right_table", "right_field", "is_key", "compare", "key_type"])
 rows = [
-    ["wd_dev.worker_core", "employee_id", "wd_prod.worker_core", "employee_id", True, True],
-    ["wd_dev.worker_core", "first_name", "wd_prod.worker_core", "fname", False, True],
-    ["wd_dev.worker_core", "last_name", "wd_prod.worker_core", "lname", False, True],
-    ["wd_dev.worker_core", "active_flag", "wd_prod.worker_core", "is_active", False, True],
-    ["wd_dev.worker_comp", "employee_id", "wd_prod.worker_comp", "employee_id", True, True],
-    ["wd_dev.worker_comp", "base_salary", "wd_prod.worker_comp", "base_pay", False, True],
-    ["wd_dev.worker_comp", "currency_code", "wd_prod.worker_comp", "currency", False, True],
-    ["wd_dev.worker_org", "employee_id", "wd_prod.worker_org", "employee_id", True, True],
-    ["wd_dev.worker_org", "cost_center", "wd_prod.worker_org", "cost_center_code", False, True],
-    ["wd_dev.worker_org", "manager_id", "wd_prod.worker_org", "mgr_employee_id", False, True],
+    ["wd_dev.worker_core", "employee_id", "wd_prod.worker_core", "employee_id", True, True, "string"],
+    ["wd_dev.worker_core", "first_name", "wd_prod.worker_core", "fname", False, True, None],
+    ["wd_dev.worker_core", "last_name", "wd_prod.worker_core", "lname", False, True, None],
+    ["wd_dev.worker_core", "active_flag", "wd_prod.worker_core", "is_active", False, True, None],
+    ["wd_dev.worker_comp", "employee_id", "wd_prod.worker_comp", "employee_id", True, True, "string"],
+    ["wd_dev.worker_comp", "base_salary", "wd_prod.worker_comp", "base_pay", False, True, None],
+    ["wd_dev.worker_comp", "currency_code", "wd_prod.worker_comp", "currency", False, True, None],
+    ["wd_dev.worker_org", "employee_id", "wd_prod.worker_org", "employee_id", True, True, "string"],
+    ["wd_dev.worker_org", "cost_center", "wd_prod.worker_org", "cost_center_code", False, True, None],
+    ["wd_dev.worker_org", "manager_id", "wd_prod.worker_org", "mgr_employee_id", False, True, None],
 ]
 for r in rows:
     ws2.append(r)
