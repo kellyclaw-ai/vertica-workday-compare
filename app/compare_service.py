@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal, ROUND_HALF_UP
 import math
 from pathlib import Path
 from typing import Any
@@ -66,6 +67,24 @@ def _normalize_datetime_value(v: Any):
     return v
 
 
+def _round_numeric(v: Any, number_precision: int):
+    if isinstance(v, bool):
+        return v
+
+    if isinstance(v, Decimal):
+        if not v.is_finite():
+            return None if v.is_nan() else v
+        quantum = Decimal("1").scaleb(-number_precision)
+        return v.quantize(quantum, rounding=ROUND_HALF_UP)
+
+    if isinstance(v, float):
+        if math.isnan(v):
+            return None
+        return round(v, number_precision)
+
+    return v
+
+
 def _normalize(
     v: Any,
     *,
@@ -87,8 +106,11 @@ def _normalize(
         return None
 
     # Treat NaN as null-equivalent when nullish_equal is enabled.
-    if isinstance(v, float) and nullish_equal and math.isnan(v):
-        return None
+    if nullish_equal:
+        if isinstance(v, float) and math.isnan(v):
+            return None
+        if isinstance(v, Decimal) and v.is_nan():
+            return None
 
     # Normalize actual date/datetime types regardless of column naming.
     if isinstance(v, (datetime, date)):
@@ -106,8 +128,8 @@ def _normalize(
             if vv.lower() in {"nan", "null", "none"}:
                 return None
         return vv
-    if isinstance(v, float):
-        return round(v, number_precision)
+    if isinstance(v, (float, Decimal)):
+        return _round_numeric(v, number_precision)
     return v
 
 
