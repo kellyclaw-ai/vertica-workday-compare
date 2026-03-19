@@ -297,6 +297,7 @@ def compare_tables(
     right_key_fields = [k.right_field for k in key_maps]
     left_key_types = {k.left_field: (k.key_type.strip().lower() if isinstance(k.key_type, str) and k.key_type.strip() else None) for k in key_maps}
     right_key_types = {k.right_field: (k.key_type.strip().lower() if isinstance(k.key_type, str) and k.key_type.strip() else None) for k in key_maps}
+    related_key_maps = [k for k in key_maps if getattr(k, "related_key", False)]
 
     left_compare_fields = [f.left_field for f in compare_maps]
     right_compare_fields = [f.right_field for f in compare_maps]
@@ -435,8 +436,17 @@ def compare_tables(
         for (lf, rf), cnt in sorted(summary_counts.items(), key=lambda x: (-x[1], x[0][0], x[0][1]))
     ]
 
-    # Combined dataset tab with side-by-side left/right values and mismatch identifier
+    # Combined dataset tab with side-by-side left/right values and mismatch identifier.
+    # Include issue rows only, plus clean rows related to issue rows via any mapped related_key.
     compare_pairs = [(f.left_field, f.right_field) for f in compare_maps]
+
+    def _row_related_key_values(lrow: dict[str, Any] | None, rrow: dict[str, Any] | None) -> dict[str, Any]:
+        values: dict[str, Any] = {}
+        for km in related_key_maps:
+            lv = _normalize((lrow or {}).get(km.left_field), table_name=left_table, field_name=km.left_field, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+            rv = _normalize((rrow or {}).get(km.right_field), table_name=right_table, field_name=km.right_field, value_map_ix=value_map_ix, trim_strings=trim_strings, nullish_equal=nullish_equal, number_precision=number_precision)
+            values[km.left_field] = lv if lv is not None else rv
+        return values
 
     def _combined_row(origin: str, key_tuple: tuple[Any, ...], lrow: dict[str, Any] | None, rrow: dict[str, Any] | None) -> dict[str, Any]:
         out: dict[str, Any] = {"row_origin": origin, "mismatch_fields": ""}
@@ -457,13 +467,42 @@ def compare_tables(
         out["mismatch_fields"] = ", ".join(mismatches)
         return out
 
-    combined_rows = []
+    combined_candidates: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    issue_key_tuples: set[tuple[Any, ...]] = set()
+    issue_related_values: dict[str, set[Any]] = {km.left_field: set() for km in related_key_maps}
+
+    def _add_candidate(origin: str, key_tuple: tuple[Any, ...], lrow: dict[str, Any] | None, rrow: dict[str, Any] | None):
+        row_out = _combined_row(origin, key_tuple, lrow, rrow)
+        combined_candidates.append((key_tuple, row_out))
+        is_issue = origin in {"left_only", "right_only"} or bool(row_out["mismatch_fields"])
+        if is_issue:
+            issue_key_tuples.add(key_tuple)
+            for rk_field, rk_value in _row_related_key_values(lrow, rrow).items():
+                if rk_value is not None:
+                    issue_related_values.setdefault(rk_field, set()).add(rk_value)
+
     for k in sorted(left_keys - right_keys, key=_sort_key_tuple):
-        combined_rows.append(_combined_row("left_only", k, left_ix[k], None))
+        _add_candidate("left_only", k, left_ix[k], None)
     for k in sorted(right_keys - left_keys, key=_sort_key_tuple):
-        combined_rows.append(_combined_row("right_only", k, None, right_ix[k]))
+        _add_candidate("right_only", k, None, right_ix[k])
     for k in sorted(left_keys & right_keys, key=_sort_key_tuple):
-        combined_rows.append(_combined_row("both", k, left_ix[k], right_ix[k]))
+        _add_candidate("both", k, left_ix[k], right_ix[k])
+
+    def _is_related_row(key_tuple: tuple[Any, ...], row_out: dict[str, Any]) -> bool:
+        if key_tuple in issue_key_tuples:
+            return True
+        if not issue_related_values:
+            return False
+        for rk_field, related_vals in issue_related_values.items():
+            if related_vals and row_out.get(rk_field) in related_vals:
+                return True
+        return False
+
+    combined_rows = [
+        row_out
+        for key_tuple, row_out in combined_candidates
+        if _is_related_row(key_tuple, row_out)
+    ]
 
     # sort combined by PKs (already normalized in tuple key)
     combined_rows = sorted(combined_rows, key=lambda r: tuple(_sort_token(r.get(k)) for k in left_key_fields))

@@ -33,7 +33,7 @@ Generated at:
 
 Sheets:
 - `table_map` (left_table -> right_table)
-- `field_map` (left_table.left_field -> right_table.right_field, key flag, compare flag, optional `key_type`)
+- `field_map` (left_table.left_field -> right_table.right_field, key flag, compare flag, optional `key_type`, optional `related_key`)
 
 ### Key type coercion (for mismatched PK types)
 
@@ -48,6 +48,19 @@ Supported `key_type` values:
 - `boolean`
 
 Example: for `month` (`'01'` on one side vs `1` on the other), mark the key row with `key_type=integer`.
+
+### Related-key context rows in combined dataset output
+
+If a mapped key field should act as a grouping/relationship anchor in the `combined dataset` sheet, set `related_key=TRUE` on that `field_map` row.
+
+Behavior:
+- always include issue rows:
+  - `left_only`
+  - `right_only`
+  - `both` rows with at least one compared-field mismatch
+- also include otherwise-clean rows that share a `related_key` value with any issue row
+
+Example: if `employee_id` is marked `related_key=TRUE`, then any mismatch for one row under an employee will also pull in the other rows for that same employee in the `combined dataset` sheet.
 
 ## Vertica config placeholders
 

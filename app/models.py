@@ -18,6 +18,9 @@ class FieldMap(BaseModel):
     # Optional canonical type used to coerce key values on both sides before join.
     # Examples: integer, float, string, date, datetime, boolean
     key_type: str | None = None
+    # Marks a mapped key field as a relationship anchor for combined-dataset context rows.
+    # When any issue row is found, otherwise-clean rows sharing a related_key value are included.
+    related_key: bool = False
 
 
 class ValueMap(BaseModel):
