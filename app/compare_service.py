@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 import math
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -386,6 +387,11 @@ def compare_tables(
     left_data = sorted(left_data, key=lambda row: _sort_key_tuple(lkey(row)))
     right_data = sorted(right_data, key=lambda row: _sort_key_tuple(rkey(row)))
 
+    left_key_counts = Counter(lkey(row) for row in left_data)
+    right_key_counts = Counter(rkey(row) for row in right_data)
+    left_duplicate_rows = sum(max(0, cnt - 1) for cnt in left_key_counts.values())
+    right_duplicate_rows = sum(max(0, cnt - 1) for cnt in right_key_counts.values())
+
     left_ix = {lkey(row): row for row in left_data}
     right_ix = {rkey(row): row for row in right_data}
 
@@ -553,14 +559,26 @@ def compare_tables(
                 ws_combined.cell(row=row_idx, column=lc).fill = mismatch_fill
                 ws_combined.cell(row=row_idx, column=rc).fill = mismatch_fill
 
-    ws_meta = wb.create_sheet(_sheet_name("table names"))
+    comparison_run_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ws_meta = wb.create_sheet(_sheet_name("summary"))
     _write_table(
         ws_meta,
         [
-            {"side": "left", "table_name": left_table},
-            {"side": "right", "table_name": right_table},
+            {"metric": "comparison_run_at", "value": comparison_run_at},
+            {"metric": "left_table", "value": left_table},
+            {"metric": "right_table", "value": right_table},
+            {"metric": "left_row_count", "value": len(left_data)},
+            {"metric": "right_row_count", "value": len(right_data)},
+            {"metric": "left_only_row_count", "value": len(only_left_rows)},
+            {"metric": "right_only_row_count", "value": len(only_right_rows)},
+            {"metric": "columns_compared", "value": len(compare_pairs)},
+            {"metric": "left_only_column_count", "value": len(left_only_fields)},
+            {"metric": "right_only_column_count", "value": len(right_only_fields)},
+            {"metric": "field_mismatch_count", "value": len(field_differences_rows)},
+            {"metric": "left_duplicate_rows_by_key", "value": left_duplicate_rows},
+            {"metric": "right_duplicate_rows_by_key", "value": right_duplicate_rows},
         ],
-        headers=["side", "table_name"],
+        headers=["metric", "value"],
     )
 
     wb.save(out_path)

@@ -91,6 +91,15 @@ This app is a localhost-first FastAPI service with a server-rendered UI (Jinja t
      - `left_only`
      - `right_only`
      - `mismatched`
+   - XLSX output includes these sheets:
+     - `field differences`
+     - `field difference summary`
+     - `left only fields`
+     - `right only fields`
+     - `combined dataset`
+     - `summary`
+   - The `combined dataset` sheet includes issue rows plus any clean rows connected through mapped `related_key` fields.
+   - The `summary` sheet includes table names, row counts, mismatch counts, compared-column counts, left/right-only column counts, duplicate-key row counts, and the comparison run timestamp.
    - Optional normalization controls:
      - trim strings
      - treat null/empty-like values as equal
