@@ -1,14 +1,14 @@
-"""Compare two Excel datasets (same schema) by WorkdayID and export summary workbook.
+"""Compare two Excel datasets (same schema) by one or more key fields and export summary workbook.
 
 What it does:
 - Prompts for left/right Excel file paths in CLI.
 - Reads the first sheet from each workbook.
-- Uses WorkdayID as the primary key.
+- Uses one or more configured key fields as the primary comparison key.
 - Computes row counts:
   - left only
   - right only
   - both
-- For rows present on both sides, compares each shared field and counts differences.
+- For rows present on both sides, compares each shared non-key field and counts differences.
 - Writes output workbook to ./output with tabs:
   - Left only row count
   - Right only row count
@@ -24,11 +24,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from openpyxl import Workbook, load_workbook
 
-KEY_FIELD = "WorkdayID"
+KEY_FIELDS = ["WorkdayID"]
 
 
 def _sheet_name(name: str) -> str:
@@ -68,10 +68,23 @@ def _read_first_sheet(path: Path) -> tuple[list[str], list[dict[str, Any]]]:
     return headers, data
 
 
-def _to_index(rows: list[dict[str, Any]], key_field: str) -> dict[Any, dict[str, Any]]:
-    out: dict[Any, dict[str, Any]] = {}
+def _normalize_key_fields(key_fields: str | Iterable[str]) -> list[str]:
+    if isinstance(key_fields, str):
+        return [key_fields]
+    return [str(k).strip() for k in key_fields if str(k).strip()]
+
+
+def _key_tuple(row: dict[str, Any], key_fields: list[str]) -> tuple[Any, ...] | None:
+    values = tuple(_norm(row.get(field)) for field in key_fields)
+    if any(v is None for v in values):
+        return None
+    return values
+
+
+def _to_index(rows: list[dict[str, Any]], key_fields: list[str]) -> dict[tuple[Any, ...], dict[str, Any]]:
+    out: dict[tuple[Any, ...], dict[str, Any]] = {}
     for r in rows:
-        k = _norm(r.get(key_field))
+        k = _key_tuple(r, key_fields)
         if k is None:
             continue
         # If duplicate keys exist, keep the last seen record.
@@ -103,17 +116,23 @@ def main():
     left_headers, left_rows = _read_first_sheet(left_path)
     right_headers, right_rows = _read_first_sheet(right_path)
 
-    if KEY_FIELD not in left_headers:
-        raise SystemExit(f"Missing required key field '{KEY_FIELD}' in LEFT file header.")
-    if KEY_FIELD not in right_headers:
-        raise SystemExit(f"Missing required key field '{KEY_FIELD}' in RIGHT file header.")
+    key_fields = _normalize_key_fields(KEY_FIELDS)
+    if not key_fields:
+        raise SystemExit("At least one key field is required.")
 
-    # Use shared fields only; skip key in field-level diff summary.
+    missing_left = [k for k in key_fields if k not in left_headers]
+    missing_right = [k for k in key_fields if k not in right_headers]
+    if missing_left:
+        raise SystemExit(f"Missing required key field(s) in LEFT file header: {', '.join(missing_left)}")
+    if missing_right:
+        raise SystemExit(f"Missing required key field(s) in RIGHT file header: {', '.join(missing_right)}")
+
+    # Use shared fields only; skip key fields in field-level diff summary.
     shared_fields = [h for h in left_headers if h in set(right_headers)]
-    compare_fields = [h for h in shared_fields if h != KEY_FIELD]
+    compare_fields = [h for h in shared_fields if h not in set(key_fields)]
 
-    left_ix = _to_index(left_rows, KEY_FIELD)
-    right_ix = _to_index(right_rows, KEY_FIELD)
+    left_ix = _to_index(left_rows, key_fields)
+    right_ix = _to_index(right_rows, key_fields)
 
     left_keys = set(left_ix.keys())
     right_keys = set(right_ix.keys())
