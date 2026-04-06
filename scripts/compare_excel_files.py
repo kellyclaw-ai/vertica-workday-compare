@@ -14,6 +14,7 @@ What it does:
   - Right only row count
   - Both row count
   - Field difference summary
+  - Mismatch rows
   - Compared files
 
 Usage:
@@ -98,6 +99,47 @@ def _write_simple_count_tab(wb: Workbook, title: str, count: int):
     ws.append([title, count])
 
 
+def _append_issue_rows_tab(
+    wb: Workbook,
+    *,
+    key_fields: list[str],
+    compare_fields: list[str],
+    left_ix: dict[tuple[Any, ...], dict[str, Any]],
+    right_ix: dict[tuple[Any, ...], dict[str, Any]],
+    left_only_keys: set[tuple[Any, ...]],
+    right_only_keys: set[tuple[Any, ...]],
+    both_keys: set[tuple[Any, ...]],
+):
+    ws = wb.create_sheet(_sheet_name("Mismatch rows"))
+
+    headers = ["row_origin", "mismatch_columns"] + key_fields
+    for f in compare_fields:
+        headers.append(f"left_{f}")
+        headers.append(f"right_{f}")
+    ws.append(headers)
+
+    def append_row(origin: str, key: tuple[Any, ...], lrow: dict[str, Any] | None, rrow: dict[str, Any] | None, mismatches: list[str]):
+        out: list[Any] = [origin, ", ".join(mismatches)]
+        out.extend(list(key))
+        for f in compare_fields:
+            out.append(_norm((lrow or {}).get(f)))
+            out.append(_norm((rrow or {}).get(f)))
+        ws.append(out)
+
+    for key in sorted(left_only_keys):
+        append_row("left_only", key, left_ix[key], None, [])
+
+    for key in sorted(right_only_keys):
+        append_row("right_only", key, None, right_ix[key], [])
+
+    for key in sorted(both_keys):
+        lrow = left_ix[key]
+        rrow = right_ix[key]
+        mismatches = [f for f in compare_fields if _norm(lrow.get(f)) != _norm(rrow.get(f))]
+        if mismatches:
+            append_row("both", key, lrow, rrow, mismatches)
+
+
 def main():
     left_raw = input("Enter LEFT Excel file path: ").strip()
     right_raw = input("Enter RIGHT Excel file path: ").strip()
@@ -166,6 +208,17 @@ def main():
     ws_summary.append(["field", "difference_count"])
     for f, c in sorted(diff_counts.items(), key=lambda x: (-x[1], x[0].lower())):
         ws_summary.append([f, c])
+
+    _append_issue_rows_tab(
+        wb_out,
+        key_fields=key_fields,
+        compare_fields=compare_fields,
+        left_ix=left_ix,
+        right_ix=right_ix,
+        left_only_keys=left_only_keys,
+        right_only_keys=right_only_keys,
+        both_keys=both_keys,
+    )
 
     ws_files = wb_out.create_sheet(_sheet_name("Compared files"))
     ws_files.append(["side", "file_name", "full_path"])
